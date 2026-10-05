@@ -1,0 +1,231 @@
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum Currency {
+  BRL
+  USD
+  EUR
+  GBP
+}
+
+enum GroupRole {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+enum SplitType {
+  EQUAL
+  PERCENTAGE
+  EXACT
+  ITEMIZED
+}
+
+enum ExpenseCategory {
+  FOOD_AND_DRINK
+  ACCOMMODATION
+  TRANSPORTATION
+  ENTERTAINMENT
+  GROCERIES
+  UTILITIES
+  OTHER
+}
+
+enum ReceiptStatus {
+  PENDING
+  PROCESSED
+  FAILED
+}
+
+enum AuditAction {
+  CREATE_EXPENSE
+  UPDATE_EXPENSE
+  DELETE_EXPENSE
+  CREATE_SETTLEMENT
+  MEMBER_JOINED
+  MEMBER_LEFT
+}
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String
+  name         String
+  avatarUrl    String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  memberships         GroupMember[]
+  createdExpenses     Expense[]        @relation("ExpenseCreatedBy")
+  paymentsMade        ExpensePayer[]
+  splitsOwed          ExpenseSplit[]
+  itemAssignments     ItemAssignment[]
+  settlementsPaid     Settlement[]     @relation("SettlementPayer")
+  settlementsReceived Settlement[]     @relation("SettlementReceiver")
+  auditLogs           AuditLog[]
+
+  @@map("users")
+}
+
+model Group {
+  id          String   @id @default(uuid())
+  name        String
+  description String?
+  currency    Currency @default(BRL)
+  inviteCode  String   @unique @default(uuid())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  members     GroupMember[]
+  expenses    Expense[]
+  settlements Settlement[]
+  auditLogs   AuditLog[]
+
+  @@map("groups")
+}
+
+model GroupMember {
+  id       String    @id @default(uuid())
+  groupId  String
+  userId   String
+  role     GroupRole @default(MEMBER)
+  joinedAt DateTime  @default(now())
+
+  group Group @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, userId])
+  @@map("group_members")
+}
+
+model Expense {
+  id          String          @id @default(uuid())
+  groupId     String
+  createdById String
+  description String
+  amount      Int             // Valor total em CENTAVOS
+  currency    Currency        @default(BRL)
+  category    ExpenseCategory @default(OTHER)
+  splitType   SplitType       @default(EQUAL)
+  date        DateTime        @default(now())
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  group     Group          @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  createdBy User           @relation("ExpenseCreatedBy", fields: [createdById], references: [id])
+  payers    ExpensePayer[]
+  splits    ExpenseSplit[]
+  receipt   ExpenseReceipt?
+
+  @@map("expenses")
+}
+
+model ExpensePayer {
+  id         String @id @default(uuid())
+  expenseId  String
+  userId     String
+  amountPaid Int    // Valor pago em CENTAVOS
+
+  expense Expense @relation(fields: [expenseId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id])
+
+  @@unique([expenseId, userId])
+  @@map("expense_payers")
+}
+
+model ExpenseSplit {
+  id          String @id @default(uuid())
+  expenseId   String
+  userId      String
+  shareAmount Int    // Cota devida em CENTAVOS
+
+  expense Expense @relation(fields: [expenseId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id])
+
+  @@unique([expenseId, userId])
+  @@map("expense_splits")
+}
+
+model ExpenseReceipt {
+  id             String        @id @default(uuid())
+  expenseId      String?       @unique
+  imageUrl       String
+  merchantName   String?
+  subtotalAmount Int?          // Subtotal em CENTAVOS
+  taxAmount      Int?          // Taxa/Gorjeta em CENTAVOS
+  totalAmount    Int?          // Total lido em CENTAVOS
+  rawOcrJson     String?       // JSON armazenado como string no SQLite
+  status         ReceiptStatus @default(PENDING)
+  createdAt      DateTime      @default(now())
+
+  expense Expense?      @relation(fields: [expenseId], references: [id], onDelete: SetNull)
+  items   ExpenseItem[]
+
+  @@map("expense_receipts")
+}
+
+model ExpenseItem {
+  id         String @id @default(uuid())
+  receiptId  String
+  name       String
+  quantity   Int    @default(1)
+  unitPrice  Int    // Preço unitário em CENTAVOS
+  totalPrice Int    // Preço total em CENTAVOS
+
+  receipt     ExpenseReceipt   @relation(fields: [receiptId], references: [id], onDelete: Cascade)
+  assignments ItemAssignment[]
+
+  @@map("expense_items")
+}
+
+model ItemAssignment {
+  id             String @id @default(uuid())
+  itemId         String
+  userId         String
+  assignedAmount Int    // Parcela em CENTAVOS por usuário
+
+  item ExpenseItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  user User        @relation(fields: [userId], references: [id])
+
+  @@unique([itemId, userId])
+  @@map("item_assignments")
+}
+
+model Settlement {
+  id         String   @id @default(uuid())
+  groupId    String
+  payerId    String
+  receiverId String
+  amount     Int      // Valor em CENTAVOS
+  currency   Currency @default(BRL)
+  note       String?
+  createdAt  DateTime @default(now())
+
+  group    Group @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  payer    User  @relation("SettlementPayer", fields: [payerId], references: [id])
+  receiver User  @relation("SettlementReceiver", fields: [receiverId], references: [id])
+
+  @@map("settlements")
+}
+
+model AuditLog {
+  id         String      @id @default(uuid())
+  groupId    String
+  userId     String
+  action     AuditAction
+  entityType String
+  entityId   String
+  payload    String      // JSON armazenado como string no SQLite
+  createdAt  DateTime    @default(now())
+
+  group Group @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id])
+
+  @@map("audit_logs")
+}

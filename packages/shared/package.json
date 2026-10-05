@@ -1,0 +1,20 @@
+{
+  "name": "@racho/shared",
+  "version": "0.0.0",
+  "private": true,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "test": "npx tsx --test src/utils/money.utils.test.ts",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@racho/tsconfig": "workspace:*",
+    "@types/node": "^22.13.0",
+    "typescript": "^5.7.0"
+  }
+}
