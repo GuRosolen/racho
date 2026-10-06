@@ -1,5 +1,5 @@
 import { db, SplitType, AuditAction } from '@racho/db';
-import { CreateExpenseInput, distributeEqualCents } from '@racho/shared';
+import { CreateExpenseInput, distributeEqualCents, distributeProRataCents } from '@racho/shared';
 
 export class ExpenseService {
   async createExpense(userId: string, input: CreateExpenseInput) {
@@ -11,21 +11,116 @@ export class ExpenseService {
       throw new Error('Você não pertence a este grupo para registrar despesas');
     }
 
-    const members = await db.groupMember.findMany({
+    const groupMembers = await db.groupMember.findMany({
       where: { groupId: input.groupId },
       select: { userId: true },
     });
-    const memberIds = members.map((m) => m.userId);
+    const groupMemberIdsSet = new Set(groupMembers.map((m) => m.userId));
+
+    // Validar pertencimento de pagadores
+    for (const p of input.payers) {
+      if (!groupMemberIdsSet.has(p.userId)) {
+        throw new Error(`O usuário ${p.userId} não pertence a este grupo de despesas`);
+      }
+    }
 
     let splitsData: { userId: string; shareAmount: number }[] = [];
+    let itemsToCreateData: {
+      name: string;
+      quantity: number;
+      unitPrice: number;
+      totalPrice: number;
+      assignments: { userId: string; assignedAmount: number }[];
+    }[] = [];
 
-    if (input.splitType === SplitType.EQUAL) {
-      const equalMap = distributeEqualCents(input.amount, memberIds);
+    if (input.splitType === 'ITEMIZED') {
+      if (!input.items || input.items.length === 0) {
+        throw new Error('Uma despesa itemizada deve conter ao menos 1 item');
+      }
+
+      const totalItemsPrice = input.items.reduce((acc, item) => acc + item.totalPrice, 0);
+      const expectedTotal = totalItemsPrice + (input.taxAmount || 0);
+
+      if (expectedTotal !== input.amount) {
+        throw new Error(
+          `A soma dos itens + taxas (${expectedTotal} centavos) diverge do valor total da despesa (${input.amount} centavos)`
+        );
+      }
+
+      const userGrossConsumption = new Map<string, number>();
+
+      for (const item of input.items) {
+        if (!item.assignedUserIds || item.assignedUserIds.length === 0) {
+          throw new Error(`O item '${item.name}' deve ter ao menos 1 participante associado`);
+        }
+
+        // Validar pertencimento dos membros do item ao grupo
+        for (const uId of item.assignedUserIds) {
+          if (!groupMemberIdsSet.has(uId)) {
+            throw new Error(`O usuário ${uId} não pertence a este grupo de despesas`);
+          }
+        }
+
+        // Distribuir o valor do item em centavos entre os consumidores do item
+        const itemSplitMap = distributeEqualCents(item.totalPrice, item.assignedUserIds);
+        const itemAssignmentsData: { userId: string; assignedAmount: number }[] = [];
+
+        itemSplitMap.forEach((share, uId) => {
+          itemAssignmentsData.push({ userId: uId, assignedAmount: share });
+          const currentGross = userGrossConsumption.get(uId) || 0;
+          userGrossConsumption.set(uId, currentGross + share);
+        });
+
+        itemsToCreateData.push({
+          name: item.name,
+          quantity: item.quantity ?? 1,
+          unitPrice: item.unitPrice,
+          totalPrice: item.totalPrice,
+          assignments: itemAssignmentsData,
+        });
+      }
+
+      // Distribuir taxa / gorjeta pro-rata entre os membros que consumiram itens
+      const taxAmount = input.taxAmount || 0;
+      let taxDistributionMap = new Map<string, number>();
+      if (taxAmount > 0 && userGrossConsumption.size > 0) {
+        taxDistributionMap = distributeProRataCents(taxAmount, userGrossConsumption);
+      }
+
+      // Consolidar cotas finais por usuário (Consumo + Taxa)
+      userGrossConsumption.forEach((grossShare, uId) => {
+        const taxShare = taxDistributionMap.get(uId) || 0;
+        splitsData.push({
+          userId: uId,
+          shareAmount: grossShare + taxShare,
+        });
+      });
+    } else if (input.splitType === SplitType.EQUAL) {
+      // Suporte a Subconjunto de Membros
+      const targetMemberIds =
+        input.memberIds && input.memberIds.length > 0
+          ? input.memberIds
+          : Array.from(groupMemberIdsSet);
+
+      // Validar pertencimento do subconjunto
+      for (const uId of targetMemberIds) {
+        if (!groupMemberIdsSet.has(uId)) {
+          throw new Error(`O usuário ${uId} não pertence a este grupo de despesas`);
+        }
+      }
+
+      const equalMap = distributeEqualCents(input.amount, targetMemberIds);
       splitsData = Array.from(equalMap.entries()).map(([uId, share]) => ({
         userId: uId,
         shareAmount: share,
       }));
     } else if (input.splits && input.splits.length > 0) {
+      for (const s of input.splits) {
+        if (!groupMemberIdsSet.has(s.userId)) {
+          throw new Error(`O usuário ${s.userId} não pertence a este grupo de despesas`);
+        }
+      }
+
       splitsData = input.splits.map((s) => ({
         userId: s.userId,
         shareAmount: s.shareAmount,
@@ -48,6 +143,7 @@ export class ExpenseService {
           createdById: userId,
           description: input.description,
           amount: input.amount,
+          taxAmount: input.taxAmount || 0,
           currency: input.currency || 'BRL',
           category: input.category || 'OTHER',
           splitType: input.splitType || SplitType.EQUAL,
@@ -65,6 +161,20 @@ export class ExpenseService {
               shareAmount: s.shareAmount,
             })),
           },
+          items: {
+            create: itemsToCreateData.map((item) => ({
+              name: item.name,
+              quantity: item.quantity,
+              unitPrice: item.unitPrice,
+              totalPrice: item.totalPrice,
+              assignments: {
+                create: item.assignments.map((a) => ({
+                  userId: a.userId,
+                  assignedAmount: a.assignedAmount,
+                })),
+              },
+            })),
+          },
         },
         include: {
           payers: {
@@ -72,6 +182,13 @@ export class ExpenseService {
           },
           splits: {
             include: { user: { select: { id: true, name: true, avatarUrl: true } } },
+          },
+          items: {
+            include: {
+              assignments: {
+                include: { user: { select: { id: true, name: true } } },
+              },
+            },
           },
         },
       });
@@ -83,7 +200,11 @@ export class ExpenseService {
           action: AuditAction.CREATE_EXPENSE,
           entityType: 'EXPENSE',
           entityId: expense.id,
-          payload: JSON.stringify({ description: expense.description, amount: expense.amount }),
+          payload: JSON.stringify({
+            description: expense.description,
+            amount: expense.amount,
+            splitType: expense.splitType,
+          }),
         },
       });
 

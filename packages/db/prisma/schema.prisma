@@ -111,6 +111,7 @@ model Expense {
   createdById String
   description String
   amount      Int             // Valor total em CENTAVOS
+  taxAmount   Int             @default(0) // Taxa de serviço / Gorjeta em CENTAVOS
   currency    Currency        @default(BRL)
   category    ExpenseCategory @default(OTHER)
   splitType   SplitType       @default(EQUAL)
@@ -122,6 +123,7 @@ model Expense {
   createdBy User           @relation("ExpenseCreatedBy", fields: [createdById], references: [id])
   payers    ExpensePayer[]
   splits    ExpenseSplit[]
+  items     ExpenseItem[]
   receipt   ExpenseReceipt?
 
   @@map("expenses")
@@ -161,7 +163,7 @@ model ExpenseReceipt {
   subtotalAmount Int?          // Subtotal em CENTAVOS
   taxAmount      Int?          // Taxa/Gorjeta em CENTAVOS
   totalAmount    Int?          // Total lido em CENTAVOS
-  rawOcrJson     String?       // JSON armazenado como string no SQLite
+  rawOcrJson     String?       // JSON armazenado como string no SQLite/Postgres
   status         ReceiptStatus @default(PENDING)
   createdAt      DateTime      @default(now())
 
@@ -172,14 +174,16 @@ model ExpenseReceipt {
 }
 
 model ExpenseItem {
-  id         String @id @default(uuid())
-  receiptId  String
+  id         String   @id @default(uuid())
+  expenseId  String?
+  receiptId  String?
   name       String
-  quantity   Int    @default(1)
-  unitPrice  Int    // Preço unitário em CENTAVOS
-  totalPrice Int    // Preço total em CENTAVOS
+  quantity   Int      @default(1)
+  unitPrice  Int      // Preço unitário em CENTAVOS
+  totalPrice Int      // Preço total em CENTAVOS
 
-  receipt     ExpenseReceipt   @relation(fields: [receiptId], references: [id], onDelete: Cascade)
+  expense     Expense?        @relation(fields: [expenseId], references: [id], onDelete: Cascade)
+  receipt     ExpenseReceipt? @relation(fields: [receiptId], references: [id], onDelete: SetNull)
   assignments ItemAssignment[]
 
   @@map("expense_items")
