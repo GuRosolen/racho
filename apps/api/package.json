@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "build": "pnpm --filter @racho/shared build && pnpm --filter @racho/db build && tsc",
-    "start": "node dist/server.js",
+    "start": "tsx src/server.ts",
     "test": "npx tsx --test src/modules/groups/group-invite.test.ts src/modules/expenses/expense-itemized.test.ts",
     "lint": "tsc --noEmit"
   },
@@ -20,13 +20,13 @@
     "dotenv": "^16.4.7",
     "fastify": "^5.2.1",
     "fastify-type-provider-zod": "^4.0.2",
+    "tsx": "^4.19.2",
     "zod": "^3.24.1"
   },
   "devDependencies": {
     "@racho/tsconfig": "workspace:*",
     "@types/bcryptjs": "^2.4.6",
     "@types/node": "^22.13.0",
-    "tsx": "^4.19.2",
     "typescript": "^5.7.0"
   }
 }
