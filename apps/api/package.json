@@ -5,7 +5,7 @@
   "main": "./src/server.ts",
   "scripts": {
     "dev": "tsx watch src/server.ts",
-    "build": "tsc",
+    "build": "pnpm --filter @racho/shared build && pnpm --filter @racho/db build && tsc",
     "start": "node dist/server.js",
     "test": "npx tsx --test src/modules/groups/group-invite.test.ts src/modules/expenses/expense-itemized.test.ts",
     "lint": "tsc --noEmit"
