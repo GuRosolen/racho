@@ -153,6 +153,48 @@ describe('ExpenseService - Subconjunto de Membros & Divisão Itemizada (SDD-DELT
     assert.strictEqual(totalSplits, 11000);
   });
 
+  it('UC-ITEMIZED-02: Deve permitir itens diferentes com consumidores totalmente diferentes (ex: U1+U2 em Item A e U3+U4 em Item B)', async () => {
+    // Item 1: R$ 40,00 -> U1 e U2 (R$ 20,00 cada)
+    // Item 2: R$ 60,00 -> U3 e U4 (R$ 30,00 cada)
+    // Total = R$ 100,00 (10000 centavos)
+    const expense = await expenseService.createExpense(u1Id, {
+      groupId: testGroupId,
+      description: 'Conta de restaurante com escolhas separadas',
+      amount: 10000,
+      taxAmount: 0,
+      splitType: 'ITEMIZED',
+      payers: [{ userId: u1Id, amountPaid: 10000 }],
+      items: [
+        {
+          name: 'Vinho U1 e U2',
+          quantity: 1,
+          unitPrice: 4000,
+          totalPrice: 4000,
+          assignedUserIds: [u1Id, u2Id],
+        },
+        {
+          name: 'Pratos U3 e U4',
+          quantity: 1,
+          unitPrice: 6000,
+          totalPrice: 6000,
+          assignedUserIds: [u3Id, u4Id],
+        },
+      ],
+    });
+
+    assert.strictEqual(expense.splits.length, 4);
+    const splitsMap = new Map(expense.splits.map((s) => [s.userId, s.shareAmount]));
+
+    assert.strictEqual(splitsMap.get(u1Id), 2000);
+    assert.strictEqual(splitsMap.get(u2Id), 2000);
+    assert.strictEqual(splitsMap.get(u3Id), 3000);
+    assert.strictEqual(splitsMap.get(u4Id), 3000);
+    assert.strictEqual(splitsMap.get(u5Id), undefined); // U5 não consumiu nenhum item
+
+    const totalSplits = Array.from(splitsMap.values()).reduce((acc, val) => acc + val, 0);
+    assert.strictEqual(totalSplits, 10000);
+  });
+
   it('UC-ERR-01: Deve rejeitar despesa itemizada com divergência entre a soma dos itens + taxas e o valor total', async () => {
     await assert.rejects(
       async () => {
