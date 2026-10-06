@@ -812,7 +812,7 @@ export default function GroupDetailPage({ params }: { params: Promise<{ id: stri
                 {/* MODO ITEMIZED (Itemizado por consumo individual) */}
                 {splitType === 'ITEMIZED' && (
                   <div className="space-y-4">
-                    <div className="space-y-3 max-h-64 overflow-y-auto pr-1">
+                    <div className="space-y-4 max-h-[50vh] overflow-y-auto pr-1.5">
                       {items.map((it, idx) => (
                         <div
                           key={it.id}
