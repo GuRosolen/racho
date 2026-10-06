@@ -1,0 +1,26 @@
+services:
+  - type: web
+    name: racho-api-staging
+    env: node
+    plan: starter
+    region: ohio
+    branch: main
+    buildCommand: corepack enable && pnpm install --frozen-lockfile && pnpm --filter @racho/db run db:generate && pnpm --filter @racho/api run build
+    startCommand: node apps/api/dist/server.js
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: staging
+      - key: PORT
+        value: 3333
+      - key: HOST
+        value: 0.0.0.0
+      - key: DATABASE_URL
+        sync: false
+      - key: DIRECT_URL
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: CLIENT_URL
+        value: https://racho-staging.vercel.app

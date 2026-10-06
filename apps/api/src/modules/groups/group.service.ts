@@ -95,6 +95,55 @@ export class GroupService {
     };
   }
 
+  async getGroupPreviewByInviteCode(inviteCode: string) {
+    const group = await db.group.findUnique({
+      where: { inviteCode },
+      include: {
+        _count: {
+          select: { members: true },
+        },
+      },
+    });
+
+    if (!group) {
+      throw new Error('Código de convite inválido ou expirado');
+    }
+
+    return {
+      id: group.id,
+      name: group.name,
+      description: group.description,
+      currency: group.currency,
+      memberCount: group._count.members,
+      inviteCode: group.inviteCode,
+    };
+  }
+
+  async regenerateInviteCode(groupId: string, userId: string) {
+    const membership = await db.groupMember.findUnique({
+      where: { groupId_userId: { groupId, userId } },
+    });
+
+    if (!membership || (membership.role !== GroupRole.OWNER && membership.role !== GroupRole.ADMIN)) {
+      throw new Error('Apenas administradores ou o criador do grupo podem redefinir o link de convite');
+    }
+
+    const { randomBytes } = await import('crypto');
+    const newInviteCode = randomBytes(9).toString('base64url');
+
+    const updated = await db.group.update({
+      where: { id: groupId },
+      data: { inviteCode: newInviteCode },
+      select: {
+        id: true,
+        name: true,
+        inviteCode: true,
+      },
+    });
+
+    return updated;
+  }
+
   async joinGroupViaInvite(userId: string, inviteCode: string) {
     const group = await db.group.findUnique({
       where: { inviteCode },
@@ -112,12 +161,25 @@ export class GroupService {
       return group;
     }
 
-    await db.groupMember.create({
-      data: {
-        groupId: group.id,
-        userId,
-        role: GroupRole.MEMBER,
-      },
+    await db.$transaction(async (tx) => {
+      await tx.groupMember.create({
+        data: {
+          groupId: group.id,
+          userId,
+          role: GroupRole.MEMBER,
+        },
+      });
+
+      await tx.auditLog.create({
+        data: {
+          groupId: group.id,
+          userId,
+          action: 'MEMBER_JOINED',
+          entityType: 'GroupMember',
+          entityId: `${group.id}_${userId}`,
+          payload: JSON.stringify({ joinedVia: 'invite_link' }),
+        },
+      });
     });
 
     return group;

@@ -20,8 +20,27 @@ app.setValidatorCompiler(validatorCompiler);
 app.setSerializerCompiler(serializerCompiler);
 
 app.register(cors, {
-  origin: process.env.CLIENT_URL || true,
+  origin: (origin, cb) => {
+    if (!origin) return cb(null, true);
+
+    const configuredOrigins = process.env.CLIENT_URL
+      ? process.env.CLIENT_URL.split(',').map((o) => o.trim())
+      : [];
+
+    const isAllowed =
+      configuredOrigins.includes(origin) ||
+      /^http:\/\/localhost:\d+$/.test(origin) ||
+      /^http:\/\/127\.0\.0\.1:\d+$/.test(origin) ||
+      /^https:\/\/.*\.vercel\.app$/.test(origin);
+
+    if (isAllowed) {
+      return cb(null, true);
+    }
+
+    return cb(new Error('Bloqueado pelas políticas de CORS do Racho API'), false);
+  },
   credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
 });
 
 app.register(jwt, {

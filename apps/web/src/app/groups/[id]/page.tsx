@@ -17,6 +17,9 @@ import {
   Trash2,
   FileText,
   DollarSign,
+  Share2,
+  RefreshCw,
+  Link,
 } from 'lucide-react';
 
 interface Member {
@@ -105,11 +108,52 @@ export default function GroupDetailPage({ params }: { params: Promise<{ id: stri
     loadData();
   }, [groupId, token, router]);
 
-  const copyInviteCode = () => {
-    if (group?.inviteCode) {
-      navigator.clipboard.writeText(group.inviteCode);
+  const [regenerating, setRegenerating] = useState(false);
+
+  const handleShare = async () => {
+    if (!group?.inviteCode) return;
+    const inviteUrl = `${window.location.origin}/join/${group.inviteCode}`;
+    const shareData = {
+      title: `Convite para o grupo ${group.name} - Racho`,
+      text: `Olá! Vamos dividir as despesas do grupo "${group.name}" no Racho. Acesse pelo link:`,
+      url: inviteUrl,
+    };
+
+    if (navigator.share && navigator.canShare && navigator.canShare(shareData)) {
+      try {
+        await navigator.share(shareData);
+        return;
+      } catch (err: any) {
+        if (err.name === 'AbortError') return;
+      }
+    }
+
+    try {
+      await navigator.clipboard.writeText(inviteUrl);
       setCopiedCode(true);
-      setTimeout(() => setCopiedCode(false), 2000);
+      setTimeout(() => setCopiedCode(false), 2500);
+    } catch {
+      alert(`Link de convite: ${inviteUrl}`);
+    }
+  };
+
+  const handleRegenerateInvite = async () => {
+    if (!confirm('Deseja realmente gerar um novo link de convite? O link anterior deixará de funcionar.')) {
+      return;
+    }
+
+    setRegenerating(true);
+    try {
+      const res = await fetchApi<{ group: { id: string; inviteCode: string } }>(
+        `/groups/${groupId}/regenerate-invite`,
+        { method: 'POST', token: token! }
+      );
+      setGroup((prev) => (prev ? { ...prev, inviteCode: res.group.inviteCode } : null));
+      alert('Novo link de convite gerado com sucesso!');
+    } catch (err: any) {
+      alert(err.message || 'Erro ao gerar novo convite');
+    } finally {
+      setRegenerating(false);
     }
   };
 
@@ -209,7 +253,8 @@ export default function GroupDetailPage({ params }: { params: Promise<{ id: stri
     formData.append('file', file);
 
     try {
-      const response = await fetch('http://localhost:3333/receipts/scan', {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3333';
+      const response = await fetch(`${apiUrl}/receipts/scan`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}` },
         body: formData,
@@ -233,6 +278,10 @@ export default function GroupDetailPage({ params }: { params: Promise<{ id: stri
     );
   }
 
+  const isOwnerOrAdmin = group.members.some(
+    (m) => m.userId === user?.id && (m.role === 'OWNER' || m.role === 'ADMIN')
+  );
+
   return (
     <div className="min-h-screen bg-[#0b0f17] text-gray-100">
       {/* Header */}
@@ -253,12 +302,25 @@ export default function GroupDetailPage({ params }: { params: Promise<{ id: stri
 
           <div className="flex items-center gap-3">
             <button
-              onClick={copyInviteCode}
-              className="flex items-center gap-2 rounded-lg border border-gray-700 bg-gray-900/60 px-3 py-1.5 text-xs font-medium text-gray-300 hover:bg-gray-800"
+              onClick={handleShare}
+              className="flex items-center gap-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-1.5 text-xs font-medium text-emerald-400 transition hover:bg-emerald-500/20 shadow-sm"
+              title="Compartilhar convite do grupo"
             >
-              {copiedCode ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}
-              {copiedCode ? 'Copiado!' : `Convite: ${group.inviteCode}`}
+              {copiedCode ? <Check className="h-3.5 w-3.5" /> : <Share2 className="h-3.5 w-3.5" />}
+              {copiedCode ? 'Link Copiado!' : 'Convidar'}
             </button>
+
+            {isOwnerOrAdmin && (
+              <button
+                onClick={handleRegenerateInvite}
+                disabled={regenerating}
+                className="hidden sm:flex items-center gap-1.5 rounded-lg border border-gray-700 bg-gray-900/60 px-2.5 py-1.5 text-xs text-gray-400 hover:text-gray-200 hover:bg-gray-800 transition"
+                title="Redefinir link de convite"
+              >
+                <RefreshCw className={`h-3 w-3 ${regenerating ? 'animate-spin' : ''}`} />
+                <span className="text-[11px]">Novo Link</span>
+              </button>
+            )}
             <button
               onClick={() => setShowExpenseModal(true)}
               className="flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-emerald-600/20 hover:bg-emerald-500"

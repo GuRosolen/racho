@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuthStore } from '@/store/auth.store';
 import { fetchApi } from '@/lib/api';
-import { Plus, Users, ArrowRight, LogOut, Wallet } from 'lucide-react';
+import { Plus, Users, ArrowRight, LogOut, Wallet, UserPlus } from 'lucide-react';
 
 interface GroupSummary {
   id: string;
@@ -26,6 +26,10 @@ export default function DashboardPage() {
   const [newGroupName, setNewGroupName] = useState('');
   const [newGroupDesc, setNewGroupDesc] = useState('');
   const [creating, setCreating] = useState(false);
+
+  // Modal Entrar via Convite
+  const [showJoinModal, setShowJoinModal] = useState(false);
+  const [joinInput, setJoinInput] = useState('');
 
   useEffect(() => {
     if (!token) {
@@ -70,6 +74,20 @@ export default function DashboardPage() {
     }
   };
 
+  const handleJoinSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!joinInput.trim()) return;
+
+    let code = joinInput.trim();
+    if (code.includes('/join/')) {
+      code = code.split('/join/')[1].split('?')[0].split('/')[0];
+    }
+
+    setShowJoinModal(false);
+    setJoinInput('');
+    router.push(`/join/${code}`);
+  };
+
   return (
     <div className="min-h-screen bg-[#0b0f17] text-gray-100">
       {/* Header / Nav */}
@@ -110,12 +128,20 @@ export default function DashboardPage() {
               Gerencie despesas compartilhadas e acompanhe saldos
             </p>
           </div>
-          <button
-            onClick={() => setShowCreateModal(true)}
-            className="flex items-center gap-2 rounded-xl bg-emerald-600 px-5 py-2.5 font-semibold text-white shadow-lg shadow-emerald-600/20 transition hover:bg-emerald-500"
-          >
-            <Plus className="h-5 w-5" /> Novo Grupo
-          </button>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setShowJoinModal(true)}
+              className="flex items-center gap-2 rounded-xl border border-gray-700 bg-gray-900/60 px-4 py-2.5 font-semibold text-gray-200 transition hover:bg-gray-800"
+            >
+              <UserPlus className="h-4 w-4 text-emerald-400" /> Entrar via Código
+            </button>
+            <button
+              onClick={() => setShowCreateModal(true)}
+              className="flex items-center gap-2 rounded-xl bg-emerald-600 px-5 py-2.5 font-semibold text-white shadow-lg shadow-emerald-600/20 transition hover:bg-emerald-500"
+            >
+              <Plus className="h-5 w-5" /> Novo Grupo
+            </button>
+          </div>
         </div>
 
         {loading ? (
@@ -226,6 +252,50 @@ export default function DashboardPage() {
                   className="rounded-lg bg-emerald-600 px-5 py-2 text-sm font-semibold text-white hover:bg-emerald-500 disabled:opacity-50"
                 >
                   {creating ? 'Criando...' : 'Criar Grupo'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Entrar via Código de Convite */}
+      {showJoinModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+          <div className="w-full max-w-md rounded-2xl border border-gray-800 bg-[#131926] p-6 shadow-2xl">
+            <h3 className="text-xl font-bold text-white">Entrar em um Grupo</h3>
+            <p className="mt-1 text-xs text-gray-400">
+              Cole o link completo de convite ou apenas o código que recebeu de um amigo
+            </p>
+
+            <form onSubmit={handleJoinSubmit} className="mt-5 space-y-4">
+              <div>
+                <label className="block text-xs font-semibold uppercase text-gray-400">
+                  Link ou Código de Convite
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={joinInput}
+                  onChange={(e) => setJoinInput(e.target.value)}
+                  className="mt-1.5 w-full rounded-lg border border-gray-700 bg-gray-900 px-4 py-2 text-white placeholder-gray-500 focus:border-emerald-500 focus:outline-none"
+                  placeholder="Ex: https://racho.app/join/xyz ou apenas o código"
+                />
+              </div>
+
+              <div className="flex justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowJoinModal(false)}
+                  className="rounded-lg px-4 py-2 text-sm font-medium text-gray-400 hover:text-white"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="rounded-lg bg-emerald-600 px-5 py-2 text-sm font-semibold text-white hover:bg-emerald-500 transition"
+                >
+                  Continuar
                 </button>
               </div>
             </form>

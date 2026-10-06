@@ -28,5 +28,20 @@ export const groupDetailsSchema = z.object({
   members: z.array(groupMemberSchema),
 });
 
+export const joinGroupSchema = z.object({
+  inviteCode: z.string().min(1, 'Código de convite é obrigatório'),
+});
+
+export const groupInvitePreviewSchema = z.object({
+  id: z.string().uuid(),
+  name: z.string(),
+  description: z.string().nullable(),
+  currency: currencyEnum,
+  memberCount: z.number(),
+  inviteCode: z.string(),
+});
+
 export type CreateGroupInput = z.infer<typeof createGroupSchema>;
 export type GroupDetails = z.infer<typeof groupDetailsSchema>;
+export type JoinGroupInput = z.infer<typeof joinGroupSchema>;
+export type GroupInvitePreview = z.infer<typeof groupInvitePreviewSchema>;
