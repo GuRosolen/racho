@@ -1,6 +1,6 @@
 import { FastifyInstance } from 'fastify';
 import { ZodTypeProvider } from 'fastify-type-provider-zod';
-import { registerSchema, loginSchema } from '@racho/shared';
+import { registerSchema, loginSchema, updateProfileSchema } from '@racho/shared';
 import { AuthService } from './auth.service';
 import { authenticate } from '../../shared/middlewares/authenticate';
 
@@ -43,15 +43,20 @@ export async function authRoutes(app: FastifyInstance) {
     }
   });
 
-  // PATCH /auth/profile
-  typedApp.patch('/profile', { onRequest: [authenticate] }, async (request, reply) => {
+  const handleUpdateProfile = async (request: any, reply: any) => {
     const userId = request.user.sub;
     try {
-      const user = await authService.updateProfile(userId, request.body as any);
+      const user = await authService.updateProfile(userId, request.body);
       return reply.send({ user });
     } catch (err: any) {
       return reply.status(400).send({ message: err.message || 'Erro ao atualizar perfil' });
     }
-  });
+  };
+
+  // PATCH /auth/profile
+  typedApp.patch('/profile', { schema: { body: updateProfileSchema }, onRequest: [authenticate] }, handleUpdateProfile);
+
+  // PUT /auth/profile (Alias for backwards compatibility)
+  typedApp.put('/profile', { schema: { body: updateProfileSchema }, onRequest: [authenticate] }, handleUpdateProfile);
 }
 
