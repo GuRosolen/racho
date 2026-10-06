@@ -385,13 +385,13 @@ export default function GroupDetailPage({ params }: { params: Promise<{ id: stri
                   <div className="space-y-1">
                     <h3 className="text-lg font-bold text-white">{expense.description}</h3>
                     <p className="text-xs text-gray-400">
-                      Pago por <strong className="text-gray-200">{expense.payers[0]?.user.name}</strong> •{' '}
+                      Pago por <strong className="text-gray-200">{expense.payers?.[0]?.user?.name || expense.createdBy?.name || 'Membro'}</strong> •{' '}
                       {new Date(expense.createdAt).toLocaleDateString('pt-BR')}
                     </p>
-                    <div className="flex gap-2 pt-1">
-                      {expense.splits.map((s) => (
-                        <span key={s.user.id} className="rounded-md bg-gray-800 px-2 py-0.5 text-[10px] text-gray-300">
-                          {s.user.name}: {formatCentsToCurrency(s.shareAmount)}
+                    <div className="flex flex-wrap gap-2 pt-1">
+                      {expense.splits?.map((s, idx) => (
+                        <span key={s.user?.id || idx} className="rounded-md bg-gray-800 px-2 py-0.5 text-[10px] text-gray-300">
+                          {s.user?.name || 'Membro'}: {formatCentsToCurrency(s.shareAmount)}
                         </span>
                       ))}
                     </div>
