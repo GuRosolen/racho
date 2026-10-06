@@ -19,6 +19,19 @@ const app = fastify().withTypeProvider<ZodTypeProvider>();
 app.setValidatorCompiler(validatorCompiler);
 app.setSerializerCompiler(serializerCompiler);
 
+app.addContentTypeParser('application/json', { parseAs: 'string' }, (_req, body, done) => {
+  if (!body || (typeof body === 'string' && body.trim() === '')) {
+    return done(null, undefined);
+  }
+  try {
+    const json = JSON.parse(body as string);
+    done(null, json);
+  } catch (err: any) {
+    err.statusCode = 400;
+    done(err, undefined);
+  }
+});
+
 app.register(cors, {
   origin: (origin, cb) => {
     if (!origin) return cb(null, true);

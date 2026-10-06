@@ -15,6 +15,7 @@ import {
   Zap,
   CheckCircle2,
   Trash2,
+  Pencil,
   FileText,
   DollarSign,
   Share2,
@@ -42,14 +43,26 @@ interface GroupDetails {
 
 interface Expense {
   id: string;
+  createdById?: string;
+  paidById?: string;
+  version?: number;
   description: string;
   amount: number;
+  taxAmount?: number;
   category: string;
   splitType: string;
   createdAt: string;
   createdBy: { id: string; name: string };
   payers: { amountPaid: number; user: { id: string; name: string } }[];
   splits: { shareAmount: number; user: { id: string; name: string } }[];
+  items?: {
+    id?: string;
+    name: string;
+    quantity: number;
+    unitPrice: number;
+    totalPrice: number;
+    assignments?: { userId?: string; user?: { id: string; name: string } }[];
+  }[];
 }
 
 export default function GroupDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -66,8 +79,9 @@ export default function GroupDetailPage({ params }: { params: Promise<{ id: stri
   const [loading, setLoading] = useState(true);
   const [copiedCode, setCopiedCode] = useState(false);
 
-  // Modal de Nova Despesa
+  // Modal de Nova / Edição de Despesa
   const [showExpenseModal, setShowExpenseModal] = useState(false);
+  const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
   const [splitType, setSplitType] = useState<'EQUAL' | 'ITEMIZED'>('EQUAL');
   const [desc, setDesc] = useState('');
   const [amountStr, setAmountStr] = useState('');
@@ -94,16 +108,49 @@ export default function GroupDetailPage({ params }: { params: Promise<{ id: stri
   const [scanning, setScanning] = useState(false);
   const [scannedResult, setScannedResult] = useState<any>(null);
 
-  const openExpenseModal = () => {
-    if (group) {
-      const allMemberIds = group.members.map((m) => m.userId);
+  const openExpenseModal = (expenseToEdit?: Expense) => {
+    if (!group) return;
+    const allMemberIds = group.members.map((m) => m.userId);
+
+    if (expenseToEdit) {
+      setEditingExpense(expenseToEdit);
+      setDesc(expenseToEdit.description);
+      const isItemized = expenseToEdit.splitType === 'ITEMIZED';
+      setSplitType(isItemized ? 'ITEMIZED' : 'EQUAL');
+
+      if (isItemized) {
+        setTaxAmountStr(expenseToEdit.taxAmount ? (expenseToEdit.taxAmount / 100).toString().replace('.', ',') : '');
+        if (expenseToEdit.items && expenseToEdit.items.length > 0) {
+          setItems(
+            expenseToEdit.items.map((it, idx) => ({
+              id: it.id || `${Date.now()}-${idx}`,
+              name: it.name,
+              unitPriceStr: (it.unitPrice / 100).toString().replace('.', ','),
+              quantity: it.quantity || 1,
+              assignedMemberIds: it.assignments?.length
+                ? it.assignments.map((a) => a.userId || a.user?.id!).filter(Boolean)
+                : allMemberIds,
+            }))
+          );
+        } else {
+          setItems([{ id: Date.now().toString(), name: '', unitPriceStr: '', quantity: 1, assignedMemberIds: allMemberIds }]);
+        }
+      } else {
+        setAmountStr((expenseToEdit.amount / 100).toString().replace('.', ','));
+        setSelectedMemberIds(
+          expenseToEdit.splits?.length ? expenseToEdit.splits.map((s) => s.user.id) : allMemberIds
+        );
+      }
+    } else {
+      setEditingExpense(null);
       setSelectedMemberIds(allMemberIds);
       setItems([{ id: Date.now().toString(), name: '', unitPriceStr: '', quantity: 1, assignedMemberIds: allMemberIds }]);
+      setDesc('');
+      setAmountStr('');
+      setTaxAmountStr('');
+      setSplitType('EQUAL');
     }
-    setDesc('');
-    setAmountStr('');
-    setTaxAmountStr('');
-    setSplitType('EQUAL');
+
     setShowExpenseModal(true);
   };
 
@@ -241,18 +288,33 @@ export default function GroupDetailPage({ params }: { params: Promise<{ id: stri
           return;
         }
 
-        await fetchApi('/expenses', {
-          method: 'POST',
-          token,
-          body: JSON.stringify({
-            groupId: group.id,
-            description: desc,
-            amount: amountCents,
-            splitType: 'EQUAL',
-            memberIds: selectedMemberIds.length === group.members.length ? undefined : selectedMemberIds,
-            payers: [{ userId: user.id, amountPaid: amountCents }],
-          }),
-        });
+        if (editingExpense) {
+          await fetchApi(`/expenses/${group.id}/${editingExpense.id}`, {
+            method: 'PUT',
+            token,
+            body: JSON.stringify({
+              version: editingExpense.version || 1,
+              description: desc,
+              amount: amountCents,
+              splitType: 'EQUAL',
+              memberIds: selectedMemberIds.length === group.members.length ? undefined : selectedMemberIds,
+              payers: [{ userId: user.id, amountPaid: amountCents }],
+            }),
+          });
+        } else {
+          await fetchApi('/expenses', {
+            method: 'POST',
+            token,
+            body: JSON.stringify({
+              groupId: group.id,
+              description: desc,
+              amount: amountCents,
+              splitType: 'EQUAL',
+              memberIds: selectedMemberIds.length === group.members.length ? undefined : selectedMemberIds,
+              payers: [{ userId: user.id, amountPaid: amountCents }],
+            }),
+          });
+        }
       } else {
         // MODO ITEMIZED
         if (items.length === 0) {
@@ -297,19 +359,35 @@ export default function GroupDetailPage({ params }: { params: Promise<{ id: stri
         const taxCents = taxAmountStr ? Math.round(parseFloat(taxAmountStr.replace(',', '.')) * 100) : 0;
         const totalAmountCents = itemsSubtotalCents + (isNaN(taxCents) ? 0 : taxCents);
 
-        await fetchApi('/expenses', {
-          method: 'POST',
-          token,
-          body: JSON.stringify({
-            groupId: group.id,
-            description: desc,
-            amount: totalAmountCents,
-            splitType: 'ITEMIZED',
-            taxAmount: isNaN(taxCents) ? 0 : taxCents,
-            payers: [{ userId: user.id, amountPaid: totalAmountCents }],
-            items: formattedItems,
-          }),
-        });
+        if (editingExpense) {
+          await fetchApi(`/expenses/${group.id}/${editingExpense.id}`, {
+            method: 'PUT',
+            token,
+            body: JSON.stringify({
+              version: editingExpense.version || 1,
+              description: desc,
+              amount: totalAmountCents,
+              splitType: 'ITEMIZED',
+              taxAmount: isNaN(taxCents) ? 0 : taxCents,
+              payers: [{ userId: user.id, amountPaid: totalAmountCents }],
+              items: formattedItems,
+            }),
+          });
+        } else {
+          await fetchApi('/expenses', {
+            method: 'POST',
+            token,
+            body: JSON.stringify({
+              groupId: group.id,
+              description: desc,
+              amount: totalAmountCents,
+              splitType: 'ITEMIZED',
+              taxAmount: isNaN(taxCents) ? 0 : taxCents,
+              payers: [{ userId: user.id, amountPaid: totalAmountCents }],
+              items: formattedItems,
+            }),
+          });
+        }
       }
 
       // Recarregar extrato e saldos
@@ -451,7 +529,7 @@ export default function GroupDetailPage({ params }: { params: Promise<{ id: stri
               </button>
             )}
             <button
-              onClick={openExpenseModal}
+              onClick={() => openExpenseModal()}
               className="flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-emerald-600/20 hover:bg-emerald-500 transition"
             >
               <Plus className="h-4 w-4" /> Nova Despesa
@@ -535,12 +613,24 @@ export default function GroupDetailPage({ params }: { params: Promise<{ id: stri
                         Divisão {expense.splitType}
                       </p>
                     </div>
-                    <button
-                      onClick={() => handleDeleteExpense(expense.id)}
-                      className="rounded-lg p-2 text-gray-500 hover:bg-red-500/10 hover:text-red-400"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
+                    <div className="flex items-center gap-1">
+                      {(expense.createdById === user?.id || expense.createdBy?.id === user?.id) && (
+                        <button
+                          onClick={() => openExpenseModal(expense)}
+                          className="rounded-lg p-2 text-gray-400 hover:bg-emerald-500/10 hover:text-emerald-400 transition"
+                          title="Editar despesa (somente criador)"
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </button>
+                      )}
+                      <button
+                        onClick={() => handleDeleteExpense(expense.id)}
+                        className="rounded-lg p-2 text-gray-500 hover:bg-red-500/10 hover:text-red-400 transition"
+                        title="Excluir despesa"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
                   </div>
                 </div>
               ))
@@ -709,7 +799,7 @@ export default function GroupDetailPage({ params }: { params: Promise<{ id: stri
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm overflow-y-auto">
             <div className="w-full max-w-xl my-8 rounded-2xl border border-gray-800 bg-[#131926] p-6 shadow-2xl space-y-5">
               <div className="flex items-center justify-between border-b border-gray-800/80 pb-3">
-                <h2 className="text-xl font-bold text-white">Nova Despesa no Grupo</h2>
+                <h2 className="text-xl font-bold text-white">{editingExpense ? 'Editar Despesa' : 'Nova Despesa no Grupo'}</h2>
                 <button
                   type="button"
                   onClick={() => setShowExpenseModal(false)}
@@ -934,7 +1024,7 @@ export default function GroupDetailPage({ params }: { params: Promise<{ id: stri
                     disabled={submitting}
                     className="rounded-xl bg-emerald-600 px-5 py-2 text-sm font-semibold text-white hover:bg-emerald-500 disabled:opacity-50 transition shadow-lg shadow-emerald-600/20"
                   >
-                    {submitting ? 'Salvando...' : 'Salvar Despesa'}
+                    {submitting ? 'Salvando...' : editingExpense ? 'Salvar Alterações' : 'Salvar Despesa'}
                   </button>
                 </div>
               </form>

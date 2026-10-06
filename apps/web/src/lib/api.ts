@@ -6,9 +6,11 @@ export async function fetchApi<T>(
 ): Promise<T> {
   const { token, headers, ...customConfig } = options;
 
-  const defaultHeaders: Record<string, string> = {
-    'Content-Type': 'application/json',
-  };
+  const defaultHeaders: Record<string, string> = {};
+
+  if (customConfig.body) {
+    defaultHeaders['Content-Type'] = 'application/json';
+  }
 
   if (token) {
     defaultHeaders['Authorization'] = `Bearer ${token}`;

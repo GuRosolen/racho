@@ -486,6 +486,13 @@ export class ExpenseService {
         splits: {
           include: { user: { select: { id: true, name: true, avatarUrl: true } } },
         },
+        items: {
+          include: {
+            assignments: {
+              include: { user: { select: { id: true, name: true } } },
+            },
+          },
+        },
         receipt: { select: { id: true, imageUrl: true, merchantName: true } },
       },
     });
