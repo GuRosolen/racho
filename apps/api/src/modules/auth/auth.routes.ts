@@ -42,4 +42,16 @@ export async function authRoutes(app: FastifyInstance) {
       return reply.status(404).send({ message: err.message });
     }
   });
+
+  // PATCH /auth/profile
+  typedApp.patch('/profile', { onRequest: [authenticate] }, async (request, reply) => {
+    const userId = request.user.sub;
+    try {
+      const user = await authService.updateProfile(userId, request.body as any);
+      return reply.send({ user });
+    } catch (err: any) {
+      return reply.status(400).send({ message: err.message || 'Erro ao atualizar perfil' });
+    }
+  });
 }
+

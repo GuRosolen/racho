@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuthStore } from '@/store/auth.store';
 import { fetchApi } from '@/lib/api';
-import { Plus, Users, ArrowRight, LogOut, Wallet, UserPlus } from 'lucide-react';
+import { Plus, Users, ArrowRight, LogOut, Wallet, UserPlus, QrCode } from 'lucide-react';
 
 interface GroupSummary {
   id: string;
@@ -18,7 +18,7 @@ interface GroupSummary {
 
 export default function DashboardPage() {
   const router = useRouter();
-  const { user, token, logout } = useAuthStore();
+  const { user, token, updateUser, logout } = useAuthStore();
 
   const [groups, setGroups] = useState<GroupSummary[]>([]);
   const [loading, setLoading] = useState(true);
@@ -30,6 +30,48 @@ export default function DashboardPage() {
   // Modal Entrar via Convite
   const [showJoinModal, setShowJoinModal] = useState(false);
   const [joinInput, setJoinInput] = useState('');
+
+  // Modal de Perfil & Chave Pix
+  const [showProfileModal, setShowProfileModal] = useState(false);
+  const [profileName, setProfileName] = useState('');
+  const [pixKeyType, setPixKeyType] = useState<'CPF' | 'EMAIL' | 'PHONE' | 'RANDOM'>('CPF');
+  const [pixKey, setPixKey] = useState('');
+  const [savingProfile, setSavingProfile] = useState(false);
+
+  const openProfileModal = () => {
+    if (user) {
+      setProfileName(user.name || '');
+      setPixKeyType((user.pixKeyType as any) || 'CPF');
+      setPixKey(user.pixKey || '');
+    }
+    setShowProfileModal(true);
+  };
+
+  const handleSaveProfile = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!token) return;
+
+    setSavingProfile(true);
+    try {
+      const res = await fetchApi<{ user: any }>('/auth/profile', {
+        method: 'PATCH',
+        token,
+        body: JSON.stringify({
+          name: profileName.trim(),
+          pixKeyType,
+          pixKey: pixKey.trim(),
+        }),
+      });
+
+      updateUser(res.user);
+      setShowProfileModal(false);
+      alert('Perfil e chave Pix atualizados com sucesso!');
+    } catch (err: any) {
+      alert(err.message || 'Erro ao atualizar perfil');
+    } finally {
+      setSavingProfile(false);
+    }
+  };
 
   useEffect(() => {
     if (!token) {
@@ -102,10 +144,20 @@ export default function DashboardPage() {
             </span>
           </div>
 
-          <div className="flex items-center gap-4">
-            <span className="text-sm font-medium text-gray-300">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={openProfileModal}
+              className="flex items-center gap-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-1.5 text-xs font-medium text-emerald-400 hover:bg-emerald-500/20 transition"
+              title="Configurar chave Pix do seu perfil"
+            >
+              <QrCode className="h-4 w-4" />
+              <span>Chave Pix</span>
+            </button>
+
+            <span className="text-sm font-medium text-gray-300 hidden sm:inline">
               Olá, <strong className="text-white">{user?.name || 'Usuário'}</strong>
             </span>
+
             <button
               onClick={() => {
                 logout();
@@ -296,6 +348,98 @@ export default function DashboardPage() {
                   className="rounded-lg bg-emerald-600 px-5 py-2 text-sm font-semibold text-white hover:bg-emerald-500 transition"
                 >
                   Continuar
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Meu Perfil & Configurar Chave Pix */}
+      {showProfileModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+          <div className="w-full max-w-md rounded-2xl border border-gray-800 bg-[#131926] p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b border-gray-800 pb-3">
+              <h3 className="text-xl font-bold text-white flex items-center gap-2">
+                <QrCode className="h-5 w-5 text-emerald-400" /> Meu Perfil & Chave Pix
+              </h3>
+              <button
+                type="button"
+                onClick={() => setShowProfileModal(false)}
+                className="text-gray-400 hover:text-white text-sm"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveProfile} className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold uppercase text-gray-400">
+                  Nome Completo
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={profileName}
+                  onChange={(e) => setProfileName(e.target.value)}
+                  className="mt-1.5 w-full rounded-xl border border-gray-700 bg-gray-900 px-4 py-2 text-white focus:border-emerald-500 focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold uppercase text-gray-400">
+                  Tipo de Chave Pix
+                </label>
+                <select
+                  value={pixKeyType}
+                  onChange={(e) => setPixKeyType(e.target.value as any)}
+                  className="mt-1.5 w-full rounded-xl border border-gray-700 bg-gray-900 px-4 py-2 text-white focus:border-emerald-500 focus:outline-none text-sm"
+                >
+                  <option value="CPF">CPF / CNPJ</option>
+                  <option value="EMAIL">E-mail</option>
+                  <option value="PHONE">Telefone</option>
+                  <option value="RANDOM">Chave Aleatória (EVP / UUID)</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold uppercase text-gray-400">
+                  Chave Pix
+                </label>
+                <input
+                  type="text"
+                  value={pixKey}
+                  onChange={(e) => setPixKey(e.target.value)}
+                  className="mt-1.5 w-full rounded-xl border border-gray-700 bg-gray-900 px-4 py-2 text-white focus:border-emerald-500 focus:outline-none placeholder-gray-600"
+                  placeholder={
+                    pixKeyType === 'CPF'
+                      ? '000.000.000-00'
+                      : pixKeyType === 'EMAIL'
+                      ? 'suachave@email.com'
+                      : pixKeyType === 'PHONE'
+                      ? '+5511999999999'
+                      : 'uuid-aleatorio-pix'
+                  }
+                />
+                <p className="mt-1 text-[11px] text-gray-500">
+                  Sua chave Pix permite que outros membros quitem dívidas diretamente pelo app.
+                </p>
+              </div>
+
+              <div className="flex justify-end gap-3 pt-2 border-t border-gray-800">
+                <button
+                  type="button"
+                  onClick={() => setShowProfileModal(false)}
+                  className="rounded-xl px-4 py-2 text-sm font-medium text-gray-400 hover:text-white"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingProfile}
+                  className="rounded-xl bg-emerald-600 px-5 py-2 text-sm font-semibold text-white hover:bg-emerald-500 disabled:opacity-50 transition shadow-lg shadow-emerald-600/20"
+                >
+                  {savingProfile ? 'Salvando...' : 'Salvar Perfil'}
                 </button>
               </div>
             </form>

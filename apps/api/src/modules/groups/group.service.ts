@@ -65,7 +65,7 @@ export class GroupService {
         members: {
           include: {
             user: {
-              select: { id: true, name: true, email: true, avatarUrl: true },
+              select: { id: true, name: true, email: true, avatarUrl: true, pixKey: true, pixKeyType: true },
             },
           },
         },
@@ -89,6 +89,8 @@ export class GroupService {
         name: m.user.name,
         email: m.user.email,
         avatarUrl: m.user.avatarUrl,
+        pixKey: m.user.pixKey,
+        pixKeyType: m.user.pixKeyType,
         role: m.role,
         joinedAt: m.joinedAt.toISOString(),
       })),

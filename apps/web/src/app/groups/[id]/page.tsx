@@ -4,7 +4,7 @@ import { useEffect, useState, use } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuthStore } from '@/store/auth.store';
 import { fetchApi } from '@/lib/api';
-import { formatCentsToCurrency, GroupBalancesResponse } from '@racho/shared';
+import { formatCentsToCurrency, GroupBalancesResponse, generatePixPayload } from '@racho/shared';
 import {
   ArrowLeft,
   Plus,
@@ -21,6 +21,7 @@ import {
   Share2,
   RefreshCw,
   Link,
+  QrCode,
 } from 'lucide-react';
 
 interface Member {
@@ -29,6 +30,8 @@ interface Member {
   name: string;
   email: string;
   avatarUrl: string | null;
+  pixKey?: string | null;
+  pixKeyType?: string | null;
   role: string;
 }
 
@@ -103,6 +106,8 @@ export default function GroupDetailPage({ params }: { params: Promise<{ id: stri
   const [showSettlementModal, setShowSettlementModal] = useState(false);
   const [settlementTarget, setSettlementTarget] = useState<{ toUserId: string; toUserName: string; amount: number } | null>(null);
   const [settling, setSettling] = useState(false);
+  const [copiedPixCode, setCopiedPixCode] = useState(false);
+  const [copiedPixKeyOnly, setCopiedPixKeyOnly] = useState(false);
 
   // State OCR Upload
   const [scanning, setScanning] = useState(false);
@@ -1033,40 +1038,122 @@ export default function GroupDetailPage({ params }: { params: Promise<{ id: stri
         );
       })()}
 
-      {/* Modal Quitar Dívida / Settlement */}
-      {showSettlementModal && settlementTarget && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-md rounded-2xl border border-gray-800 bg-[#131926] p-6 shadow-2xl space-y-4">
-            <h2 className="text-xl font-bold text-white">Quitar Dívida via PIX</h2>
-            <p className="text-sm text-gray-300">
-              Confirmar o pagamento de <strong>{formatCentsToCurrency(settlementTarget.amount)}</strong> para{' '}
-              <strong className="text-emerald-400">{settlementTarget.toUserName}</strong>?
-            </p>
+      {/* Modal Quitar Dívida / Settlement via Pix */}
+      {showSettlementModal && settlementTarget && (() => {
+        const receiverMember = group?.members.find((m) => m.userId === settlementTarget.toUserId);
+        const hasPix = Boolean(receiverMember?.pixKey);
 
-            <div className="rounded-xl bg-emerald-500/10 border border-emerald-500/20 p-4 text-xs text-emerald-300 space-y-1">
-              <div className="font-bold text-sm">Transferência Direta</div>
-              <p>Após realizar o PIX fora do app, clique abaixo para amortizar o saldo no grupo.</p>
-            </div>
+        let pixPayload = '';
+        if (hasPix && receiverMember?.pixKey) {
+          pixPayload = generatePixPayload({
+            pixKey: receiverMember.pixKey,
+            merchantName: receiverMember.name,
+            amountCents: settlementTarget.amount,
+            txId: group?.name || 'RACHO',
+          });
+        }
 
-            <div className="flex justify-end gap-3 pt-2">
-              <button
-                type="button"
-                onClick={() => setShowSettlementModal(false)}
-                className="rounded-lg px-4 py-2 text-sm font-medium text-gray-400 hover:text-white"
-              >
-                Cancelar
-              </button>
-              <button
-                onClick={handleRegisterSettlement}
-                disabled={settling}
-                className="rounded-lg bg-emerald-600 px-5 py-2 text-sm font-semibold text-white hover:bg-emerald-500 disabled:opacity-50"
-              >
-                {settling ? 'Confirmando...' : 'Confirmar Pagamento'}
-              </button>
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm overflow-y-auto">
+            <div className="w-full max-w-md my-8 rounded-2xl border border-gray-800 bg-[#131926] p-6 shadow-2xl space-y-4">
+              <div className="flex items-center justify-between border-b border-gray-800 pb-3">
+                <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                  <QrCode className="h-5 w-5 text-emerald-400" /> Pagar via Pix
+                </h2>
+                <button
+                  type="button"
+                  onClick={() => setShowSettlementModal(false)}
+                  className="text-gray-400 hover:text-white text-sm"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <div className="space-y-1">
+                <p className="text-sm text-gray-300">
+                  Transferência de <strong className="text-emerald-400">{formatCentsToCurrency(settlementTarget.amount)}</strong> para{' '}
+                  <strong className="text-white">{settlementTarget.toUserName}</strong>
+                </p>
+              </div>
+
+              {hasPix ? (
+                <div className="space-y-4">
+                  {/* QR Code */}
+                  <div className="flex flex-col items-center justify-center rounded-xl bg-gray-900 border border-gray-800 p-4 space-y-2">
+                    <img
+                      src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(pixPayload)}`}
+                      alt="QR Code Pix"
+                      className="h-44 w-44 rounded-lg bg-white p-2 shadow-md"
+                    />
+                    <span className="text-[11px] text-gray-400">Escaneie o QR Code com o aplicativo do seu banco</span>
+                  </div>
+
+                  {/* Ações Pix Copia e Cola */}
+                  <div className="space-y-2">
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        try {
+                          await navigator.clipboard.writeText(pixPayload);
+                          setCopiedPixCode(true);
+                          setTimeout(() => setCopiedPixCode(false), 2500);
+                        } catch {
+                          alert(`Código Pix: ${pixPayload}`);
+                        }
+                      }}
+                      className="w-full flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-xs font-semibold text-white hover:bg-emerald-500 transition shadow-md shadow-emerald-600/20"
+                    >
+                      {copiedPixCode ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                      {copiedPixCode ? 'Código Pix Copiado com Valor!' : 'Copiar Pix Copia e Cola'}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        try {
+                          await navigator.clipboard.writeText(receiverMember!.pixKey!);
+                          setCopiedPixKeyOnly(true);
+                          setTimeout(() => setCopiedPixKeyOnly(false), 2500);
+                        } catch {
+                          alert(`Chave Pix: ${receiverMember!.pixKey}`);
+                        }
+                      }}
+                      className="w-full flex items-center justify-center gap-2 rounded-xl border border-gray-700 bg-gray-900/80 px-4 py-2 text-xs font-medium text-gray-300 hover:bg-gray-800 transition"
+                    >
+                      {copiedPixKeyOnly ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}
+                      {copiedPixKeyOnly ? 'Chave Bruta Copiada!' : `Copiar Apenas a Chave (${receiverMember?.pixKeyType || 'Pix'})`}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-xs text-amber-300 space-y-1">
+                  <div className="font-bold text-sm text-amber-200">Sem Chave Pix Cadastrada</div>
+                  <p>
+                    <strong>{settlementTarget.toUserName}</strong> ainda não cadastrou uma chave Pix no perfil. Solicite que cadastre no app para gerar a transferência automática.
+                  </p>
+                </div>
+              )}
+
+              <div className="pt-3 border-t border-gray-800 space-y-2">
+                <button
+                  onClick={handleRegisterSettlement}
+                  disabled={settling}
+                  className="w-full rounded-xl bg-emerald-600 py-2.5 text-xs font-bold text-white hover:bg-emerald-500 disabled:opacity-50 transition shadow-md shadow-emerald-600/20"
+                >
+                  {settling ? 'Registrando...' : 'Registrar Liquidação / Marcar como Pago'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowSettlementModal(false)}
+                  className="w-full text-center text-xs text-gray-400 hover:text-white py-1"
+                >
+                  Cancelar
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
     </div>
   );
 }

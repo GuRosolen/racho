@@ -38,6 +38,13 @@ enum ExpenseCategory {
   OTHER
 }
 
+enum PixKeyType {
+  CPF
+  EMAIL
+  PHONE
+  RANDOM
+}
+
 enum ReceiptStatus {
   PENDING
   PROCESSED
@@ -54,13 +61,15 @@ enum AuditAction {
 }
 
 model User {
-  id           String   @id @default(uuid())
-  email        String   @unique
+  id           String      @id @default(uuid())
+  email        String      @unique
   passwordHash String
   name         String
   avatarUrl    String?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  pixKey       String?
+  pixKeyType   PixKeyType?
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
 
   memberships         GroupMember[]
   createdExpenses     Expense[]        @relation("CreatedExpenses")
