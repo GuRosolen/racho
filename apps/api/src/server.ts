@@ -50,7 +50,7 @@ app.register(jwt, {
 app.register(multipart);
 
 app.get('/health', async () => {
-  return { status: 'ok', service: 'racho-api', timestamp: new Date().toISOString() };
+  return { status: 'ok', service: 'racho-api', version: '1.0.5-itemized-fix', timestamp: new Date().toISOString() };
 });
 
 // Registra módulos da API
