@@ -5,7 +5,7 @@ services:
     plan: starter
     region: ohio
     branch: main
-    buildCommand: pnpm install --frozen-lockfile && pnpm --filter @racho/db run db:generate && pnpm --filter @racho/api run build
+    buildCommand: pnpm install --frozen-lockfile && pnpm --filter @racho/shared run build && pnpm --filter @racho/db run db:generate && pnpm --filter @racho/api run build
     startCommand: node apps/api/dist/server.js
     healthCheckPath: /health
     autoDeploy: true
