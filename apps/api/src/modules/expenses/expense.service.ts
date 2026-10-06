@@ -33,7 +33,9 @@ export class ExpenseService {
       assignments: { userId: string; assignedAmount: number }[];
     }[] = [];
 
-    if ((input.splitType as string) === 'ITEMIZED') {
+    const splitTypeUpper = String(input.splitType || '').toUpperCase();
+
+    if (splitTypeUpper === 'ITEMIZED') {
       if (!input.items || input.items.length === 0) {
         throw new Error('Uma despesa itemizada deve conter ao menos 1 item');
       }
@@ -105,7 +107,7 @@ export class ExpenseService {
       if (splitsData.length === 0) {
         throw new Error('Nenhum membro do grupo foi associado ao consumo dos itens');
       }
-    } else if ((input.splitType as string) === 'EQUAL') {
+    } else if (splitTypeUpper === 'EQUAL') {
       // Suporte a Subconjunto de Membros
       const targetMemberIds =
         input.memberIds && input.memberIds.length > 0

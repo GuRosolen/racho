@@ -1,7 +1,7 @@
 import { createExpenseSchema } from '../packages/shared/src/schemas/expense.schema';
 
 function testZodParse() {
-  const payload = {
+  const payloadWithoutTotalPrice = {
     groupId: '523e9c6e-3b0e-4c18-aaa4-0b739b721ba4',
     description: 'bar local',
     amount: 9900,
@@ -18,24 +18,23 @@ function testZodParse() {
         name: 'cerveja',
         unitPrice: 1500,
         quantity: 5,
-        totalPrice: 7500,
-        assignedUserIds: ['c5d42626-f5d1-44db-a330-7f81348e81ec', '7fce0ad9-7e2b-40a7-9002-ee4cca8f6011']
+        assignedUserIds: ['c5d42626-f5d1-44db-a330-7f81348e81ec']
       },
       {
         name: 'bolinho',
         unitPrice: 500,
         quantity: 3,
-        totalPrice: 1500,
-        assignedUserIds: ['c5d42626-f5d1-44db-a330-7f81348e81ec', '7fce0ad9-7e2b-40a7-9002-ee4cca8f6011']
+        assignedUserIds: ['c5d42626-f5d1-44db-a330-7f81348e81ec']
       }
     ]
   };
 
-  try {
-    const result = createExpenseSchema.parse(payload);
-    console.log('Zod parse SUCCESS! Parsed result:', result);
-  } catch (err: any) {
-    console.error('Zod parse ERROR:', err.issues || err);
+  const res = createExpenseSchema.safeParse(payloadWithoutTotalPrice);
+  console.log('safeParse success:', res.success);
+  if (!res.success) {
+    console.log('Error issues:', JSON.stringify(res.error.issues, null, 2));
+  } else {
+    console.log('Parsed data:', res.data);
   }
 }
 
