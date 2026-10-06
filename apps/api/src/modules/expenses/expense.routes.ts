@@ -1,6 +1,6 @@
 import { FastifyInstance } from 'fastify';
 import { ZodTypeProvider } from 'fastify-type-provider-zod';
-import { createExpenseSchema } from '@racho/shared';
+import { createExpenseSchema, updateExpenseSchema } from '@racho/shared';
 import { z } from 'zod';
 import { ExpenseService } from './expense.service';
 import { authenticate } from '../../shared/middlewares/authenticate';
@@ -18,9 +18,59 @@ export async function expenseRoutes(app: FastifyInstance) {
       const expense = await expenseService.createExpense(userId, request.body);
       return reply.status(201).send({ expense });
     } catch (err: any) {
-      return reply.status(400).send({ message: err.message });
+      const status = err.statusCode || 400;
+      return reply.status(status).send({ message: err.message });
     }
   });
+
+  // PUT /expenses/:groupId/:expenseId ou PUT /expenses/:expenseId - Editar despesa com OCC
+  typedApp.put(
+    '/:groupId/:expenseId',
+    {
+      schema: {
+        params: z.object({ groupId: z.string().uuid(), expenseId: z.string().uuid() }),
+        body: updateExpenseSchema,
+      },
+    },
+    async (request, reply) => {
+      const userId = request.user.sub;
+      const { groupId, expenseId } = request.params;
+      try {
+        const expense = await expenseService.updateExpense(userId, groupId, expenseId, request.body);
+        return reply.send({ expense });
+      } catch (err: any) {
+        const status = err.statusCode || 400;
+        return reply.status(status).send({ message: err.message });
+      }
+    }
+  );
+
+  typedApp.put(
+    '/:expenseId',
+    {
+      schema: {
+        params: z.object({ expenseId: z.string().uuid() }),
+        body: updateExpenseSchema,
+      },
+    },
+    async (request, reply) => {
+      const userId = request.user.sub;
+      const { expenseId } = request.params;
+      try {
+        // Obter groupId a partir do body se enviado, ou buscar a despesa
+        const { db } = await import('@racho/db');
+        const existing = await db.expense.findUnique({ where: { id: expenseId } });
+        if (!existing) {
+          return reply.status(404).send({ message: 'Despesa não encontrada' });
+        }
+        const expense = await expenseService.updateExpense(userId, existing.groupId, expenseId, request.body);
+        return reply.send({ expense });
+      } catch (err: any) {
+        const status = err.statusCode || 400;
+        return reply.status(status).send({ message: err.message });
+      }
+    }
+  );
 
   // GET /expenses/group/:groupId - Listar extrato de despesas do grupo
   typedApp.get(
@@ -33,7 +83,8 @@ export async function expenseRoutes(app: FastifyInstance) {
         const expenses = await expenseService.getGroupExpenses(groupId, userId);
         return reply.send({ expenses });
       } catch (err: any) {
-        return reply.status(400).send({ message: err.message });
+        const status = err.statusCode || 400;
+        return reply.status(status).send({ message: err.message });
       }
     }
   );
@@ -49,8 +100,10 @@ export async function expenseRoutes(app: FastifyInstance) {
         const result = await expenseService.deleteExpense(expenseId, userId);
         return reply.send(result);
       } catch (err: any) {
-        return reply.status(400).send({ message: err.message });
+        const status = err.statusCode || 400;
+        return reply.status(status).send({ message: err.message });
       }
     }
   );
 }
+

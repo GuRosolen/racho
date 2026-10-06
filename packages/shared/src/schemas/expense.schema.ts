@@ -102,3 +102,48 @@ export type ExpenseItemInput = z.input<typeof expenseItemInputSchema>;
 export type CreateExpenseInput = z.input<typeof createExpenseSchema>;
 export type CreateExpenseOutput = z.output<typeof createExpenseSchema>;
 
+export const updateExpenseSchema = z
+  .object({
+    version: z.number().int().positive('A versão atual da despesa é obrigatória para o bloqueio otimista'),
+    description: z.string().min(1, 'Descrição é obrigatória'),
+    amount: z.number().int().positive('Valor total da despesa deve ser positivo em centavos'),
+    taxAmount: z.number().int().nonnegative('Taxa deve ser um inteiro não-negativo em centavos').default(0),
+    currency: currencyEnum.default('BRL'),
+    category: expenseCategoryEnum.default('OTHER'),
+    splitType: splitTypeEnum.default('EQUAL'),
+    date: z.string().optional(),
+    receiptId: z.string().uuid().optional(),
+    payers: z.array(expensePayerInputSchema).min(1, 'Ao menos um pagador deve ser informado'),
+    memberIds: z.array(z.string().uuid()).min(1).optional(),
+    splits: z.array(expenseSplitInputSchema).optional(),
+    items: z.array(expenseItemInputSchema).optional(),
+    itemAssignments: z.array(itemAssignmentInputSchema).optional(),
+  })
+  .refine(
+    (data) => {
+      const totalPaid = data.payers.reduce((acc, p) => acc + p.amountPaid, 0);
+      return totalPaid === data.amount;
+    },
+    {
+      message: 'A soma dos valores pagos deve ser exatamente igual ao valor total da despesa',
+      path: ['payers'],
+    }
+  )
+  .refine(
+    (data) => {
+      if (data.splitType === 'ITEMIZED') {
+        if (!data.items || data.items.length === 0) return false;
+        const totalItemsPrice = data.items.reduce((acc, i) => acc + i.totalPrice, 0);
+        return totalItemsPrice + (data.taxAmount || 0) === data.amount;
+      }
+      return true;
+    },
+    {
+      message: 'No modo itemizado, a soma dos itens + taxas deve ser exatamente igual ao valor total da despesa',
+      path: ['items'],
+    }
+  );
+
+export type UpdateExpenseInput = z.input<typeof updateExpenseSchema>;
+
+

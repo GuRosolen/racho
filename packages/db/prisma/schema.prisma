@@ -63,7 +63,8 @@ model User {
   updatedAt    DateTime @updatedAt
 
   memberships         GroupMember[]
-  createdExpenses     Expense[]        @relation("ExpenseCreatedBy")
+  createdExpenses     Expense[]        @relation("CreatedExpenses")
+  paidExpenses        Expense[]        @relation("PaidExpenses")
   paymentsMade        ExpensePayer[]
   splitsOwed          ExpenseSplit[]
   itemAssignments     ItemAssignment[]
@@ -109,6 +110,7 @@ model Expense {
   id          String          @id @default(uuid())
   groupId     String
   createdById String
+  paidById    String?
   description String
   amount      Int             // Valor total em CENTAVOS
   taxAmount   Int             @default(0) // Taxa de serviço / Gorjeta em CENTAVOS
@@ -116,16 +118,22 @@ model Expense {
   category    ExpenseCategory @default(OTHER)
   splitType   SplitType       @default(EQUAL)
   date        DateTime        @default(now())
+  version     Int             @default(1)
   createdAt   DateTime        @default(now())
   updatedAt   DateTime        @updatedAt
 
   group     Group          @relation(fields: [groupId], references: [id], onDelete: Cascade)
-  createdBy User           @relation("ExpenseCreatedBy", fields: [createdById], references: [id])
+  createdBy User           @relation("CreatedExpenses", fields: [createdById], references: [id])
+  paidBy    User?          @relation("PaidExpenses", fields: [paidById], references: [id])
   payers    ExpensePayer[]
   splits    ExpenseSplit[]
   items     ExpenseItem[]
   receipt   ExpenseReceipt?
 
+  @@index([groupId])
+  @@index([groupId, createdById])
+  @@index([groupId, paidById])
+  @@index([id, version])
   @@map("expenses")
 }
 
