@@ -29,13 +29,32 @@ export const itemAssignmentInputSchema = z.object({
   assignedAmount: z.number().int().positive('Valor atribuído ao item em centavos'),
 });
 
-export const expenseItemInputSchema = z.object({
-  name: z.string().min(1, 'Nome do item é obrigatório'),
-  quantity: z.number().int().positive().default(1),
-  unitPrice: z.number().int().positive('Preço unitário deve ser positivo em centavos'),
-  totalPrice: z.number().int().positive('Preço total do item deve ser positivo em centavos'),
-  assignedUserIds: z.array(z.string().uuid()).min(1, 'Ao menos um membro deve ser associado ao item'),
-});
+export const expenseItemInputSchema = z
+  .object({
+    name: z.string().min(1, 'Nome do item é obrigatório'),
+    quantity: z.number().int().positive().default(1),
+    unitPrice: z.number().int().positive('Preço unitário deve ser positivo em centavos'),
+    totalPrice: z.number().int().positive('Preço total do item deve ser positivo em centavos').optional(),
+    assignedUserIds: z.array(z.string().uuid()).optional(),
+    assignedMemberIds: z.array(z.string().uuid()).optional(),
+  })
+  .transform((item) => {
+    const qty = item.quantity ?? 1;
+    const calculatedTotal = item.unitPrice * qty;
+    const userIds = item.assignedUserIds || item.assignedMemberIds || [];
+    return {
+      name: item.name,
+      quantity: qty,
+      unitPrice: item.unitPrice,
+      totalPrice: item.totalPrice ?? calculatedTotal,
+      assignedUserIds: userIds,
+      assignedMemberIds: userIds,
+    };
+  })
+  .refine((item) => item.assignedUserIds.length > 0, {
+    message: 'Ao menos um membro deve ser associado ao item',
+    path: ['assignedUserIds'],
+  });
 
 export const createExpenseSchema = z
   .object({
@@ -82,3 +101,4 @@ export const createExpenseSchema = z
 export type ExpenseItemInput = z.input<typeof expenseItemInputSchema>;
 export type CreateExpenseInput = z.input<typeof createExpenseSchema>;
 export type CreateExpenseOutput = z.output<typeof createExpenseSchema>;
+

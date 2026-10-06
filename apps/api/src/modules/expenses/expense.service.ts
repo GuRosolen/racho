@@ -38,7 +38,10 @@ export class ExpenseService {
         throw new Error('Uma despesa itemizada deve conter ao menos 1 item');
       }
 
-      const totalItemsPrice = input.items.reduce((acc, item) => acc + item.totalPrice, 0);
+      const totalItemsPrice = input.items.reduce((acc, item) => {
+        const itemTot = item.totalPrice ?? item.unitPrice * (item.quantity ?? 1);
+        return acc + itemTot;
+      }, 0);
       const expectedTotal = totalItemsPrice + (input.taxAmount || 0);
 
       if (expectedTotal !== input.amount) {
@@ -50,19 +53,22 @@ export class ExpenseService {
       const userGrossConsumption = new Map<string, number>();
 
       for (const item of input.items) {
-        if (!item.assignedUserIds || item.assignedUserIds.length === 0) {
+        const assignedUserIds = item.assignedUserIds || (item as any).assignedMemberIds || [];
+        if (assignedUserIds.length === 0) {
           throw new Error(`O item '${item.name}' deve ter ao menos 1 participante associado`);
         }
 
         // Validar pertencimento dos membros do item ao grupo
-        for (const uId of item.assignedUserIds) {
+        for (const uId of assignedUserIds) {
           if (!groupMemberIdsSet.has(uId)) {
             throw new Error(`O usuário ${uId} não pertence a este grupo de despesas`);
           }
         }
 
+        const itemTotPrice = item.totalPrice ?? item.unitPrice * (item.quantity ?? 1);
+
         // Distribuir o valor do item em centavos entre os consumidores do item
-        const itemSplitMap = distributeEqualCents(item.totalPrice, item.assignedUserIds);
+        const itemSplitMap = distributeEqualCents(itemTotPrice, assignedUserIds);
         const itemAssignmentsData: { userId: string; assignedAmount: number }[] = [];
 
         itemSplitMap.forEach((share, uId) => {
@@ -75,7 +81,7 @@ export class ExpenseService {
           name: item.name,
           quantity: item.quantity ?? 1,
           unitPrice: item.unitPrice,
-          totalPrice: item.totalPrice,
+          totalPrice: itemTotPrice,
           assignments: itemAssignmentsData,
         });
       }

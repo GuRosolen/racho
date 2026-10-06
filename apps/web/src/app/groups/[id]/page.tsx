@@ -282,11 +282,14 @@ export default function GroupDetailPage({ params }: { params: Promise<{ id: stri
             return;
           }
 
-          itemsSubtotalCents += priceCents * item.quantity;
+          const itemTotalCents = priceCents * item.quantity;
+          itemsSubtotalCents += itemTotalCents;
           formattedItems.push({
             name: item.name.trim(),
             unitPrice: priceCents,
             quantity: item.quantity,
+            totalPrice: itemTotalCents,
+            assignedUserIds: item.assignedMemberIds,
             assignedMemberIds: item.assignedMemberIds,
           });
         }
