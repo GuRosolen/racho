@@ -68,8 +68,21 @@ export default function GroupDetailPage({ params }: { params: Promise<{ id: stri
 
   // Modal de Nova Despesa
   const [showExpenseModal, setShowExpenseModal] = useState(false);
+  const [splitType, setSplitType] = useState<'EQUAL' | 'ITEMIZED'>('EQUAL');
   const [desc, setDesc] = useState('');
   const [amountStr, setAmountStr] = useState('');
+  const [selectedMemberIds, setSelectedMemberIds] = useState<string[]>([]);
+
+  // State para modo ITEMIZED
+  interface ItemInput {
+    id: string;
+    name: string;
+    unitPriceStr: string;
+    quantity: number;
+    assignedMemberIds: string[];
+  }
+  const [items, setItems] = useState<ItemInput[]>([]);
+  const [taxAmountStr, setTaxAmountStr] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
   // Modal de Liquidação / Settlement
@@ -80,6 +93,19 @@ export default function GroupDetailPage({ params }: { params: Promise<{ id: stri
   // State OCR Upload
   const [scanning, setScanning] = useState(false);
   const [scannedResult, setScannedResult] = useState<any>(null);
+
+  const openExpenseModal = () => {
+    if (group) {
+      const allMemberIds = group.members.map((m) => m.userId);
+      setSelectedMemberIds(allMemberIds);
+      setItems([{ id: Date.now().toString(), name: '', unitPriceStr: '', quantity: 1, assignedMemberIds: allMemberIds }]);
+    }
+    setDesc('');
+    setAmountStr('');
+    setTaxAmountStr('');
+    setSplitType('EQUAL');
+    setShowExpenseModal(true);
+  };
 
   useEffect(() => {
     if (!token) {
@@ -157,29 +183,131 @@ export default function GroupDetailPage({ params }: { params: Promise<{ id: stri
     }
   };
 
+  const addItemInput = () => {
+    const allMemberIds = group ? group.members.map((m) => m.userId) : [];
+    setItems((prev) => [
+      ...prev,
+      { id: Date.now().toString(), name: '', unitPriceStr: '', quantity: 1, assignedMemberIds: allMemberIds },
+    ]);
+  };
+
+  const removeItemInput = (id: string) => {
+    if (items.length <= 1) return;
+    setItems((prev) => prev.filter((it) => it.id !== id));
+  };
+
+  const updateItemInput = (id: string, field: keyof ItemInput, value: any) => {
+    setItems((prev) => prev.map((it) => (it.id === id ? { ...it, [field]: value } : it)));
+  };
+
+  const toggleItemMember = (itemId: string, memberUserId: string) => {
+    setItems((prev) =>
+      prev.map((it) => {
+        if (it.id !== itemId) return it;
+        const exists = it.assignedMemberIds.includes(memberUserId);
+        const newIds = exists
+          ? it.assignedMemberIds.filter((id) => id !== memberUserId)
+          : [...it.assignedMemberIds, memberUserId];
+        return { ...it, assignedMemberIds: newIds };
+      })
+    );
+  };
+
+  const toggleEqualMember = (memberUserId: string) => {
+    setSelectedMemberIds((prev) =>
+      prev.includes(memberUserId)
+        ? prev.filter((id) => id !== memberUserId)
+        : [...prev, memberUserId]
+    );
+  };
+
   const handleCreateExpense = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!desc.trim() || !amountStr || !token || !user || !group) return;
-
-    const amountCents = Math.round(parseFloat(amountStr.replace(',', '.')) * 100);
-    if (isNaN(amountCents) || amountCents <= 0) {
-      alert('Informe um valor válido em R$');
-      return;
-    }
+    if (!desc.trim() || !token || !user || !group) return;
 
     setSubmitting(true);
     try {
-      await fetchApi('/expenses', {
-        method: 'POST',
-        token,
-        body: JSON.stringify({
-          groupId: group.id,
-          description: desc,
-          amount: amountCents,
-          splitType: 'EQUAL',
-          payers: [{ userId: user.id, amountPaid: amountCents }],
-        }),
-      });
+      if (splitType === 'EQUAL') {
+        const amountCents = Math.round(parseFloat(amountStr.replace(',', '.')) * 100);
+        if (isNaN(amountCents) || amountCents <= 0) {
+          alert('Informe um valor válido em R$');
+          setSubmitting(false);
+          return;
+        }
+
+        if (selectedMemberIds.length === 0) {
+          alert('Selecione pelo menos um participante para o rateio');
+          setSubmitting(false);
+          return;
+        }
+
+        await fetchApi('/expenses', {
+          method: 'POST',
+          token,
+          body: JSON.stringify({
+            groupId: group.id,
+            description: desc,
+            amount: amountCents,
+            splitType: 'EQUAL',
+            memberIds: selectedMemberIds.length === group.members.length ? undefined : selectedMemberIds,
+            payers: [{ userId: user.id, amountPaid: amountCents }],
+          }),
+        });
+      } else {
+        // MODO ITEMIZED
+        if (items.length === 0) {
+          alert('Adicione pelo menos um item à despesa');
+          setSubmitting(false);
+          return;
+        }
+
+        let itemsSubtotalCents = 0;
+        const formattedItems = [];
+
+        for (const item of items) {
+          if (!item.name.trim()) {
+            alert('Preencha a descrição de todos os itens');
+            setSubmitting(false);
+            return;
+          }
+          const priceCents = Math.round(parseFloat(item.unitPriceStr.replace(',', '.')) * 100);
+          if (isNaN(priceCents) || priceCents <= 0) {
+            alert(`Informe um valor unitário válido para o item "${item.name}"`);
+            setSubmitting(false);
+            return;
+          }
+          if (item.assignedMemberIds.length === 0) {
+            alert(`Selecione ao menos um consumidor para o item "${item.name}"`);
+            setSubmitting(false);
+            return;
+          }
+
+          itemsSubtotalCents += priceCents * item.quantity;
+          formattedItems.push({
+            name: item.name.trim(),
+            unitPrice: priceCents,
+            quantity: item.quantity,
+            assignedMemberIds: item.assignedMemberIds,
+          });
+        }
+
+        const taxCents = taxAmountStr ? Math.round(parseFloat(taxAmountStr.replace(',', '.')) * 100) : 0;
+        const totalAmountCents = itemsSubtotalCents + (isNaN(taxCents) ? 0 : taxCents);
+
+        await fetchApi('/expenses', {
+          method: 'POST',
+          token,
+          body: JSON.stringify({
+            groupId: group.id,
+            description: desc,
+            amount: totalAmountCents,
+            splitType: 'ITEMIZED',
+            taxAmount: isNaN(taxCents) ? 0 : taxCents,
+            payers: [{ userId: user.id, amountPaid: totalAmountCents }],
+            items: formattedItems,
+          }),
+        });
+      }
 
       // Recarregar extrato e saldos
       const [expRes, balRes] = await Promise.all([
@@ -190,8 +318,6 @@ export default function GroupDetailPage({ params }: { params: Promise<{ id: stri
       setExpenses(expRes.expenses);
       setBalances(balRes);
       setShowExpenseModal(false);
-      setDesc('');
-      setAmountStr('');
     } catch (err: any) {
       alert(err.message || 'Erro ao salvar despesa');
     } finally {
@@ -322,8 +448,8 @@ export default function GroupDetailPage({ params }: { params: Promise<{ id: stri
               </button>
             )}
             <button
-              onClick={() => setShowExpenseModal(true)}
-              className="flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-emerald-600/20 hover:bg-emerald-500"
+              onClick={openExpenseModal}
+              className="flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-emerald-600/20 hover:bg-emerald-500 transition"
             >
               <Plus className="h-4 w-4" /> Nova Despesa
             </button>
@@ -567,64 +693,252 @@ export default function GroupDetailPage({ params }: { params: Promise<{ id: stri
         )}
       </main>
 
-      {/* Modal Nova Despesa */}
-      {showExpenseModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-md rounded-2xl border border-gray-800 bg-[#131926] p-6 shadow-2xl space-y-4">
-            <h2 className="text-xl font-bold text-white">Nova Despesa no Grupo</h2>
-            <form onSubmit={handleCreateExpense} className="space-y-4">
-              <div>
-                <label className="block text-xs font-semibold uppercase text-gray-400">
-                  Descrição
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={desc}
-                  onChange={(e) => setDesc(e.target.value)}
-                  className="mt-1.5 w-full rounded-lg border border-gray-700 bg-gray-900 px-4 py-2 text-white focus:border-emerald-500 focus:outline-none"
-                  placeholder="Ex: Jantar de Sábado"
-                />
-              </div>
+      {/* Modal Nova Despesa Expandido (Equal/Subset + Itemized) */}
+      {showExpenseModal && (() => {
+        const calculatedItemsTotal = items.reduce((acc, it) => {
+          const price = parseFloat(it.unitPriceStr.replace(',', '.')) || 0;
+          return acc + price * it.quantity;
+        }, 0);
+        const calculatedTax = parseFloat(taxAmountStr.replace(',', '.')) || 0;
+        const calculatedGrandTotal = calculatedItemsTotal + calculatedTax;
 
-              <div>
-                <label className="block text-xs font-semibold uppercase text-gray-400">
-                  Valor Total (R$)
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={amountStr}
-                  onChange={(e) => setAmountStr(e.target.value)}
-                  className="mt-1.5 w-full rounded-lg border border-gray-700 bg-gray-900 px-4 py-2 text-white focus:border-emerald-500 focus:outline-none"
-                  placeholder="150,00"
-                />
-              </div>
-
-              <div className="rounded-lg bg-gray-900/60 p-3 text-xs text-gray-400">
-                💡 A despesa será paga por você (<strong>{user?.name}</strong>) e dividida igualmente entre os {group.members.length} membros do grupo.
-              </div>
-
-              <div className="flex justify-end gap-3 pt-2">
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm overflow-y-auto">
+            <div className="w-full max-w-xl my-8 rounded-2xl border border-gray-800 bg-[#131926] p-6 shadow-2xl space-y-5">
+              <div className="flex items-center justify-between border-b border-gray-800/80 pb-3">
+                <h2 className="text-xl font-bold text-white">Nova Despesa no Grupo</h2>
                 <button
                   type="button"
                   onClick={() => setShowExpenseModal(false)}
-                  className="rounded-lg px-4 py-2 text-sm font-medium text-gray-400 hover:text-white"
+                  className="text-gray-400 hover:text-white text-sm"
                 >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  disabled={submitting}
-                  className="rounded-lg bg-emerald-600 px-5 py-2 text-sm font-semibold text-white hover:bg-emerald-500 disabled:opacity-50"
-                >
-                  {submitting ? 'Salvando...' : 'Salvar Despesa'}
+                  ✕
                 </button>
               </div>
-            </form>
+
+              {/* Switcher de Modos */}
+              <div className="grid grid-cols-2 gap-2 rounded-xl bg-gray-900 p-1 text-sm">
+                <button
+                  type="button"
+                  onClick={() => setSplitType('EQUAL')}
+                  className={`py-2 px-3 rounded-lg font-medium transition ${
+                    splitType === 'EQUAL'
+                      ? 'bg-emerald-600 text-white shadow-md'
+                      : 'text-gray-400 hover:text-gray-200'
+                  }`}
+                >
+                  Divisão Igual (Total / Subconjunto)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSplitType('ITEMIZED')}
+                  className={`py-2 px-3 rounded-lg font-medium transition ${
+                    splitType === 'ITEMIZED'
+                      ? 'bg-emerald-600 text-white shadow-md'
+                      : 'text-gray-400 hover:text-gray-200'
+                  }`}
+                >
+                  Divisão por Itens (Consumo)
+                </button>
+              </div>
+
+              <form onSubmit={handleCreateExpense} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400">
+                    Descrição da Despesa
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={desc}
+                    onChange={(e) => setDesc(e.target.value)}
+                    className="mt-1.5 w-full rounded-xl border border-gray-700 bg-gray-900 px-4 py-2.5 text-white focus:border-emerald-500 focus:outline-none"
+                    placeholder="Ex: Almoço de Domingo ou Conta de Bar"
+                  />
+                </div>
+
+                {/* MODO EQUAL (Total ou Subconjunto) */}
+                {splitType === 'EQUAL' && (
+                  <div className="space-y-4">
+                    <div>
+                      <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400">
+                        Valor Total (R$)
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        value={amountStr}
+                        onChange={(e) => setAmountStr(e.target.value)}
+                        className="mt-1.5 w-full rounded-xl border border-gray-700 bg-gray-900 px-4 py-2.5 text-white focus:border-emerald-500 focus:outline-none"
+                        placeholder="150,00"
+                      />
+                    </div>
+
+                    {/* Seleção de Participantes (Subconjunto) */}
+                    <div className="space-y-2 rounded-xl bg-gray-900/60 p-4 border border-gray-800">
+                      <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400">
+                        Participantes do Rateio ({selectedMemberIds.length} de {group.members.length} selecionados)
+                      </label>
+                      <div className="grid grid-cols-2 gap-2 pt-1 max-h-40 overflow-y-auto">
+                        {group.members.map((m) => {
+                          const isChecked = selectedMemberIds.includes(m.userId);
+                          return (
+                            <label
+                              key={m.id}
+                              className={`flex items-center gap-2.5 p-2 rounded-lg border text-xs cursor-pointer transition ${
+                                isChecked
+                                  ? 'border-emerald-500/50 bg-emerald-500/10 text-white'
+                                  : 'border-gray-800 bg-gray-900/40 text-gray-400 hover:border-gray-700'
+                              }`}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={isChecked}
+                                onChange={() => toggleEqualMember(m.userId)}
+                                className="rounded accent-emerald-500 h-4 w-4"
+                              />
+                              <span className="truncate">{m.name}</span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* MODO ITEMIZED (Itemizado por consumo individual) */}
+                {splitType === 'ITEMIZED' && (
+                  <div className="space-y-4">
+                    <div className="space-y-3 max-h-64 overflow-y-auto pr-1">
+                      {items.map((it, idx) => (
+                        <div
+                          key={it.id}
+                          className="p-3.5 rounded-xl border border-gray-800 bg-gray-900/80 space-y-3"
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-xs font-bold text-emerald-400">Item #{idx + 1}</span>
+                            {items.length > 1 && (
+                              <button
+                                type="button"
+                                onClick={() => removeItemInput(it.id)}
+                                className="text-xs text-red-400 hover:text-red-300"
+                              >
+                                Remover Item
+                              </button>
+                            )}
+                          </div>
+
+                          <div className="grid grid-cols-12 gap-2">
+                            <input
+                              type="text"
+                              placeholder="Nome do item (ex: Cerveja)"
+                              value={it.name}
+                              onChange={(e) => updateItemInput(it.id, 'name', e.target.value)}
+                              className="col-span-6 rounded-lg border border-gray-700 bg-gray-900 px-3 py-1.5 text-xs text-white focus:border-emerald-500 focus:outline-none"
+                            />
+                            <input
+                              type="text"
+                              placeholder="Preço Unit. (R$)"
+                              value={it.unitPriceStr}
+                              onChange={(e) => updateItemInput(it.id, 'unitPriceStr', e.target.value)}
+                              className="col-span-4 rounded-lg border border-gray-700 bg-gray-900 px-3 py-1.5 text-xs text-white focus:border-emerald-500 focus:outline-none"
+                            />
+                            <input
+                              type="number"
+                              min={1}
+                              placeholder="Qtd"
+                              value={it.quantity}
+                              onChange={(e) =>
+                                updateItemInput(it.id, 'quantity', parseInt(e.target.value) || 1)
+                              }
+                              className="col-span-2 rounded-lg border border-gray-700 bg-gray-900 px-2 py-1.5 text-xs text-white text-center focus:border-emerald-500 focus:outline-none"
+                            />
+                          </div>
+
+                          {/* Quem consumiu este item */}
+                          <div className="space-y-1">
+                            <span className="text-[11px] font-semibold text-gray-400">Quem consumiu:</span>
+                            <div className="flex flex-wrap gap-1.5 pt-0.5">
+                              {group.members.map((m) => {
+                                const isChecked = it.assignedMemberIds.includes(m.userId);
+                                return (
+                                  <button
+                                    key={m.id}
+                                    type="button"
+                                    onClick={() => toggleItemMember(it.id, m.userId)}
+                                    className={`px-2 py-1 rounded-md text-[11px] font-medium transition border ${
+                                      isChecked
+                                        ? 'bg-emerald-500/20 border-emerald-500/60 text-emerald-300'
+                                        : 'bg-gray-800/60 border-gray-700/50 text-gray-400 hover:text-gray-200'
+                                    }`}
+                                  >
+                                    {m.name} {isChecked ? '✓' : ''}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={addItemInput}
+                      className="w-full py-2 rounded-xl border border-dashed border-emerald-500/40 text-emerald-400 text-xs font-semibold hover:bg-emerald-500/10 transition flex items-center justify-center gap-1.5"
+                    >
+                      <Plus className="h-3.5 w-3.5" /> Adicionar Outro Item
+                    </button>
+
+                    {/* Campo de Taxa de Serviço / Gorjeta */}
+                    <div className="pt-2 border-t border-gray-800">
+                      <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400">
+                        Taxa de Serviço / Gorjeta / Couvert Geral (R$)
+                      </label>
+                      <input
+                        type="text"
+                        value={taxAmountStr}
+                        onChange={(e) => setTaxAmountStr(e.target.value)}
+                        className="mt-1.5 w-full rounded-xl border border-gray-700 bg-gray-900 px-4 py-2 text-white text-xs focus:border-emerald-500 focus:outline-none"
+                        placeholder="0,00 (Será distribuída proporcionalmente ao consumo de cada um)"
+                      />
+                    </div>
+
+                    {/* Total Calculado */}
+                    <div className="flex items-center justify-between rounded-xl bg-emerald-500/10 border border-emerald-500/20 p-3">
+                      <span className="text-xs text-emerald-300 font-medium">Total Calculado da Despesa:</span>
+                      <span className="text-lg font-bold text-emerald-400">
+                        R$ {calculatedGrandTotal.toFixed(2).replace('.', ',')}
+                      </span>
+                    </div>
+                  </div>
+                )}
+
+                <div className="rounded-lg bg-gray-900/60 p-3 text-xs text-gray-400">
+                  💡 A despesa será paga por você (<strong>{user?.name}</strong>) e os rateios serão calculados com precisão ao salvar.
+                </div>
+
+                <div className="flex justify-end gap-3 pt-2 border-t border-gray-800">
+                  <button
+                    type="button"
+                    onClick={() => setShowExpenseModal(false)}
+                    className="rounded-xl px-4 py-2 text-sm font-medium text-gray-400 hover:text-white"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={submitting}
+                    className="rounded-xl bg-emerald-600 px-5 py-2 text-sm font-semibold text-white hover:bg-emerald-500 disabled:opacity-50 transition shadow-lg shadow-emerald-600/20"
+                  >
+                    {submitting ? 'Salvando...' : 'Salvar Despesa'}
+                  </button>
+                </div>
+              </form>
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* Modal Quitar Dívida / Settlement */}
       {showSettlementModal && settlementTarget && (
