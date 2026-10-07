@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, use } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuthStore } from '@/store/auth.store';
 import { fetchApi } from '@/lib/api';
 import { formatCentsToCurrency, GroupBalancesResponse, generatePixPayload } from '@racho/shared';
@@ -102,12 +102,15 @@ export default function GroupDetailPage({ params }: { params: Promise<{ id: stri
   const [taxAmountStr, setTaxAmountStr] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
+  const searchParams = useSearchParams();
+
   // Modal de Liquidação / Settlement
   const [showSettlementModal, setShowSettlementModal] = useState(false);
   const [settlementTarget, setSettlementTarget] = useState<{ toUserId: string; toUserName: string; amount: number } | null>(null);
   const [settling, setSettling] = useState(false);
   const [copiedPixCode, setCopiedPixCode] = useState(false);
   const [copiedPixKeyOnly, setCopiedPixKeyOnly] = useState(false);
+  const [copiedShareLink, setCopiedShareLink] = useState(false);
 
   // State OCR Upload
   const [scanning, setScanning] = useState(false);
@@ -185,6 +188,26 @@ export default function GroupDetailPage({ params }: { params: Promise<{ id: stri
 
     loadData();
   }, [groupId, token, router]);
+
+  // Deep Link handler para ?to=USER_ID&amount=CENTAVOS
+  useEffect(() => {
+    if (!group || !balances) return;
+    const toUserId = searchParams.get('to') || searchParams.get('receiverId');
+    const amountParam = searchParams.get('amount');
+    if (toUserId) {
+      const receiverMember = group.members.find((m) => m.userId === toUserId);
+      if (receiverMember) {
+        const amount = amountParam ? parseInt(amountParam, 10) : 0;
+        setSettlementTarget({
+          toUserId: receiverMember.userId,
+          toUserName: receiverMember.name,
+          amount: amount > 0 ? amount : 0,
+        });
+        setShowSettlementModal(true);
+        setActiveTab('balances');
+      }
+    }
+  }, [group, balances, searchParams]);
 
   const [regenerating, setRegenerating] = useState(false);
 
@@ -690,37 +713,76 @@ export default function GroupDetailPage({ params }: { params: Promise<{ id: stri
                     <CheckCircle2 className="h-5 w-5" /> Todas as contas deste grupo estão zeradas!
                   </div>
                 ) : (
-                  balances.simplifiedDebts.map((debt, idx) => (
-                    <div
-                      key={idx}
-                      className="flex items-center justify-between rounded-xl border border-gray-800 bg-[#131926] p-4 shadow-md"
-                    >
-                      <div className="text-sm">
-                        <strong className="text-red-400">{debt.fromUserName}</strong> deve pagar{' '}
-                        <strong className="text-emerald-400">{debt.toUserName}</strong>
+                  balances.simplifiedDebts.map((debt, idx) => {
+                    const creditorMember = group?.members.find((m) => m.userId === debt.toUserId);
+                    const hasPix = Boolean(creditorMember?.pixKey);
+                    const isDebtor = user?.id === debt.fromUserId;
+
+                    return (
+                      <div
+                        key={idx}
+                        className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-xl border border-gray-800 bg-[#131926] p-4 shadow-md hover:border-gray-700 transition"
+                      >
+                        <div className="space-y-1">
+                          <div className="text-sm font-medium text-gray-200 flex items-center gap-2">
+                            <strong className="text-red-400 font-semibold">{debt.fromUserName}</strong>
+                            <span className="text-gray-400 text-xs">deve pagar</span>
+                            <strong className="text-emerald-400 font-semibold">{debt.toUserName}</strong>
+                          </div>
+
+                          {hasPix ? (
+                            <div className="flex items-center gap-2 text-[11px] text-emerald-400/90 font-medium">
+                              <span className="inline-block h-2 w-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                              <span>Chave Pix cadastrada ({creditorMember?.pixKeyType || 'Pix'})</span>
+                            </div>
+                          ) : (
+                            <div className="flex items-center gap-2 text-[11px] text-amber-400/90 font-medium">
+                              <span className="inline-block h-2 w-2 rounded-full bg-amber-400"></span>
+                              <span>Credor ainda não cadastrou chave Pix</span>
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="flex items-center gap-3">
+                          <span className="font-extrabold text-white text-base">
+                            {formatCentsToCurrency(debt.amount)}
+                          </span>
+
+                          {hasPix ? (
+                            <button
+                              onClick={() => {
+                                setSettlementTarget({
+                                  toUserId: debt.toUserId,
+                                  toUserName: debt.toUserName,
+                                  amount: debt.amount,
+                                });
+                                setShowSettlementModal(true);
+                              }}
+                              className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-500 transition shadow-md shadow-emerald-600/20"
+                            >
+                              <Zap className="h-3.5 w-3.5 fill-current" />
+                              {isDebtor ? 'Pagar via Pix' : 'Ver Cobrança Pix'}
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => {
+                                setSettlementTarget({
+                                  toUserId: debt.toUserId,
+                                  toUserName: debt.toUserName,
+                                  amount: debt.amount,
+                                });
+                                setShowSettlementModal(true);
+                              }}
+                              className="flex items-center gap-1.5 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-1.5 text-xs font-semibold text-amber-300 hover:bg-amber-500/20 transition"
+                            >
+                              <DollarSign className="h-3.5 w-3.5" />
+                              Quitar Manualmente
+                            </button>
+                          )}
+                        </div>
                       </div>
-                      <div className="flex items-center gap-3">
-                        <span className="font-extrabold text-white">
-                          {formatCentsToCurrency(debt.amount)}
-                        </span>
-                        {user?.id === debt.fromUserId && (
-                          <button
-                            onClick={() => {
-                              setSettlementTarget({
-                                toUserId: debt.toUserId,
-                                toUserName: debt.toUserName,
-                                amount: debt.amount,
-                              });
-                              setShowSettlementModal(true);
-                            }}
-                            className="rounded-lg bg-emerald-600 px-3 py-1 text-xs font-semibold text-white hover:bg-emerald-500"
-                          >
-                            Quitar PIX
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  ))
+                    );
+                  })
                 )}
               </div>
             </div>
@@ -1049,31 +1111,69 @@ export default function GroupDetailPage({ params }: { params: Promise<{ id: stri
             pixKey: receiverMember.pixKey,
             merchantName: receiverMember.name,
             amountCents: settlementTarget.amount,
-            txId: group?.name || 'RACHO',
+            txId: group?.name ? `RACHO-${group.name}`.slice(0, 25) : 'RACHO',
           });
         }
 
+        const shareUrl = typeof window !== 'undefined'
+          ? `${window.location.origin}/groups/${groupId}?to=${settlementTarget.toUserId}&amount=${settlementTarget.amount}`
+          : '';
+
+        const shareText = `Olá! Segue a cobrança do racha no Racho (Grupo: ${group?.name || 'Racho'}):\n` +
+          `💰 Valor: ${formatCentsToCurrency(settlementTarget.amount)}\n` +
+          `👤 Credor: ${settlementTarget.toUserName}\n` +
+          (hasPix ? `🔑 Chave Pix (${receiverMember?.pixKeyType || 'Pix'}): ${receiverMember?.pixKey}\n` : '') +
+          `🔗 Link para ver cobrança e QR Code: ${shareUrl}`;
+
+        const handleShareWhatsApp = async () => {
+          if (typeof navigator !== 'undefined' && navigator.share) {
+            try {
+              await navigator.share({
+                title: `Cobrança Pix - ${group?.name || 'Racho'}`,
+                text: shareText,
+                url: shareUrl,
+              });
+              return;
+            } catch {
+              // Fallback se o usuário cancelar o share sheet nativo
+            }
+          }
+          const whatsappUrl = `https://api.whatsapp.com/send?text=${encodeURIComponent(shareText)}`;
+          window.open(whatsappUrl, '_blank');
+        };
+
         return (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm overflow-y-auto">
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-md overflow-y-auto">
             <div className="w-full max-w-md my-8 rounded-2xl border border-gray-800 bg-[#131926] p-6 shadow-2xl space-y-4">
               <div className="flex items-center justify-between border-b border-gray-800 pb-3">
-                <h2 className="text-xl font-bold text-white flex items-center gap-2">
-                  <QrCode className="h-5 w-5 text-emerald-400" /> Pagar via Pix
+                <h2 className="text-lg font-bold text-white flex items-center gap-2">
+                  <QrCode className="h-5 w-5 text-emerald-400" /> Cobrança & Liquidação Pix
                 </h2>
                 <button
                   type="button"
                   onClick={() => setShowSettlementModal(false)}
-                  className="text-gray-400 hover:text-white text-sm"
+                  className="rounded-lg p-1 text-gray-400 hover:bg-gray-800 hover:text-white transition"
                 >
                   ✕
                 </button>
               </div>
 
-              <div className="space-y-1">
-                <p className="text-sm text-gray-300">
-                  Transferência de <strong className="text-emerald-400">{formatCentsToCurrency(settlementTarget.amount)}</strong> para{' '}
-                  <strong className="text-white">{settlementTarget.toUserName}</strong>
-                </p>
+              {/* Resumo do Pagamento */}
+              <div className="rounded-xl border border-gray-800 bg-gray-900/60 p-4 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-gray-400">Valor Total da Dívida</span>
+                  <span className="text-xl font-extrabold text-emerald-400">
+                    {formatCentsToCurrency(settlementTarget.amount)}
+                  </span>
+                </div>
+                <div className="text-xs text-gray-300 border-t border-gray-800/80 pt-2 flex justify-between">
+                  <span>Credor (Recebedor):</span>
+                  <strong className="text-white font-medium">{settlementTarget.toUserName}</strong>
+                </div>
+                <div className="text-xs text-gray-300 flex justify-between">
+                  <span>Mensagem do Racha:</span>
+                  <span className="text-gray-400">Racho - {group?.name}</span>
+                </div>
               </div>
 
               {hasPix ? (
@@ -1081,14 +1181,16 @@ export default function GroupDetailPage({ params }: { params: Promise<{ id: stri
                   {/* QR Code */}
                   <div className="flex flex-col items-center justify-center rounded-xl bg-gray-900 border border-gray-800 p-4 space-y-2">
                     <img
-                      src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(pixPayload)}`}
+                      src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(pixPayload)}`}
                       alt="QR Code Pix"
-                      className="h-44 w-44 rounded-lg bg-white p-2 shadow-md"
+                      className="h-44 w-44 rounded-lg bg-white p-2 shadow-lg"
                     />
-                    <span className="text-[11px] text-gray-400">Escaneie o QR Code com o aplicativo do seu banco</span>
+                    <span className="text-[11px] text-gray-400 text-center">
+                      Escaneie o QR Code com o app do seu banco para pagar com valor pré-preenchido
+                    </span>
                   </div>
 
-                  {/* Ações Pix Copia e Cola */}
+                  {/* Ações Pix Copia e Cola & Chave */}
                   <div className="space-y-2">
                     <button
                       type="button"
@@ -1101,46 +1203,82 @@ export default function GroupDetailPage({ params }: { params: Promise<{ id: stri
                           alert(`Código Pix: ${pixPayload}`);
                         }
                       }}
-                      className="w-full flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-xs font-semibold text-white hover:bg-emerald-500 transition shadow-md shadow-emerald-600/20"
+                      className="w-full flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-xs font-bold text-white hover:bg-emerald-500 transition shadow-md shadow-emerald-600/20"
                     >
-                      {copiedPixCode ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
-                      {copiedPixCode ? 'Código Pix Copiado com Valor!' : 'Copiar Pix Copia e Cola'}
+                      {copiedPixCode ? <Check className="h-4 w-4 text-white" /> : <Copy className="h-4 w-4" />}
+                      {copiedPixCode ? 'Código Pix Copiado com Valor!' : 'Copiar Código Pix (com valor)'}
                     </button>
 
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          try {
+                            await navigator.clipboard.writeText(receiverMember!.pixKey!);
+                            setCopiedPixKeyOnly(true);
+                            setTimeout(() => setCopiedPixKeyOnly(false), 2500);
+                          } catch {
+                            alert(`Chave Pix: ${receiverMember!.pixKey}`);
+                          }
+                        }}
+                        className="flex items-center justify-center gap-1.5 rounded-xl border border-gray-700 bg-gray-900/80 px-3 py-2 text-xs font-medium text-gray-300 hover:bg-gray-800 transition"
+                      >
+                        {copiedPixKeyOnly ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}
+                        {copiedPixKeyOnly ? 'Chave Copiada!' : `Chave (${receiverMember?.pixKeyType || 'Pix'})`}
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          try {
+                            await navigator.clipboard.writeText(shareUrl);
+                            setCopiedShareLink(true);
+                            setTimeout(() => setCopiedShareLink(false), 2500);
+                          } catch {
+                            alert(`Link da cobrança: ${shareUrl}`);
+                          }
+                        }}
+                        className="flex items-center justify-center gap-1.5 rounded-xl border border-gray-700 bg-gray-900/80 px-3 py-2 text-xs font-medium text-gray-300 hover:bg-gray-800 transition"
+                      >
+                        {copiedShareLink ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Link className="h-3.5 w-3.5" />}
+                        {copiedShareLink ? 'Link Copiado!' : 'Copiar Link'}
+                      </button>
+                    </div>
+
+                    {/* Compartilhar via WhatsApp */}
                     <button
                       type="button"
-                      onClick={async () => {
-                        try {
-                          await navigator.clipboard.writeText(receiverMember!.pixKey!);
-                          setCopiedPixKeyOnly(true);
-                          setTimeout(() => setCopiedPixKeyOnly(false), 2500);
-                        } catch {
-                          alert(`Chave Pix: ${receiverMember!.pixKey}`);
-                        }
-                      }}
-                      className="w-full flex items-center justify-center gap-2 rounded-xl border border-gray-700 bg-gray-900/80 px-4 py-2 text-xs font-medium text-gray-300 hover:bg-gray-800 transition"
+                      onClick={handleShareWhatsApp}
+                      className="w-full flex items-center justify-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-2.5 text-xs font-semibold text-emerald-300 hover:bg-emerald-500/20 transition"
                     >
-                      {copiedPixKeyOnly ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}
-                      {copiedPixKeyOnly ? 'Chave Bruta Copiada!' : `Copiar Apenas a Chave (${receiverMember?.pixKeyType || 'Pix'})`}
+                      <Share2 className="h-4 w-4" />
+                      Compartilhar Cobrança via WhatsApp
                     </button>
                   </div>
                 </div>
               ) : (
-                <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-xs text-amber-300 space-y-1">
-                  <div className="font-bold text-sm text-amber-200">Sem Chave Pix Cadastrada</div>
-                  <p>
-                    <strong>{settlementTarget.toUserName}</strong> ainda não cadastrou uma chave Pix no perfil. Solicite que cadastre no app para gerar a transferência automática.
+                <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-xs text-amber-300 space-y-2">
+                  <div className="font-bold text-sm text-amber-200 flex items-center gap-2">
+                    <span>⚠️ Credor sem Chave Pix Cadastrada</span>
+                  </div>
+                  <p className="leading-relaxed">
+                    <strong>{settlementTarget.toUserName}</strong> ainda não registrou uma chave Pix no perfil. Solicite que cadastre no app para a geração automática do QR Code pré-preenchido.
+                  </p>
+                  <p className="text-[11px] text-amber-400/80 pt-1">
+                    Você pode efetuar a transferência tradicional ou acerto em dinheiro e clicar em "Confirmar Pagamento" abaixo.
                   </p>
                 </div>
               )}
 
+              {/* Botão de Quitação Pós-Pagamento */}
               <div className="pt-3 border-t border-gray-800 space-y-2">
                 <button
                   onClick={handleRegisterSettlement}
                   disabled={settling}
-                  className="w-full rounded-xl bg-emerald-600 py-2.5 text-xs font-bold text-white hover:bg-emerald-500 disabled:opacity-50 transition shadow-md shadow-emerald-600/20"
+                  className="w-full rounded-xl bg-emerald-600 py-3 text-xs font-bold text-white hover:bg-emerald-500 disabled:opacity-50 transition shadow-lg shadow-emerald-600/20 flex items-center justify-center gap-2"
                 >
-                  {settling ? 'Registrando...' : 'Registrar Liquidação / Marcar como Pago'}
+                  <CheckCircle2 className="h-4 w-4" />
+                  {settling ? 'Registrando Liquidação...' : 'Confirmar Pagamento / Marcar como Quitado'}
                 </button>
                 <button
                   type="button"

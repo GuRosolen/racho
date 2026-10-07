@@ -1,4 +1,7 @@
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3333';
+const getApiUrl = () => {
+  const url = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3333';
+  return url.replace(/\/+$/, '');
+};
 
 export async function fetchApi<T>(
   endpoint: string,
@@ -16,7 +19,10 @@ export async function fetchApi<T>(
     defaultHeaders['Authorization'] = `Bearer ${token}`;
   }
 
-  const response = await fetch(`${API_URL}${endpoint}`, {
+  const baseUrl = getApiUrl();
+  const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+
+  const response = await fetch(`${baseUrl}${cleanEndpoint}`, {
     headers: {
       ...defaultHeaders,
       ...headers,
@@ -32,3 +38,4 @@ export async function fetchApi<T>(
 
   return data as T;
 }
+

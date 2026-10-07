@@ -56,7 +56,10 @@ export async function authRoutes(app: FastifyInstance) {
   // PATCH /auth/profile
   typedApp.patch('/profile', { schema: { body: updateProfileSchema }, onRequest: [authenticate] }, handleUpdateProfile);
 
-  // PUT /auth/profile (Alias for backwards compatibility)
+  // PUT /auth/profile (Alias para compatibilidade)
   typedApp.put('/profile', { schema: { body: updateProfileSchema }, onRequest: [authenticate] }, handleUpdateProfile);
+
+  // POST /auth/profile (Alias para compatibilidade)
+  typedApp.post('/profile', { schema: { body: updateProfileSchema }, onRequest: [authenticate] }, handleUpdateProfile);
 }
 

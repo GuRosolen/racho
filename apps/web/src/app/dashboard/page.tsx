@@ -52,16 +52,39 @@ export default function DashboardPage() {
     if (!token) return;
 
     setSavingProfile(true);
+    const body = JSON.stringify({
+      name: profileName.trim(),
+      pixKeyType,
+      pixKey: pixKey.trim(),
+    });
+
     try {
-      const res = await fetchApi<{ user: any }>('/auth/profile', {
-        method: 'PATCH',
-        token,
-        body: JSON.stringify({
-          name: profileName.trim(),
-          pixKeyType,
-          pixKey: pixKey.trim(),
-        }),
-      });
+      let res: { user: any };
+      try {
+        res = await fetchApi<{ user: any }>('/auth/profile', {
+          method: 'PATCH',
+          token,
+          body,
+        });
+      } catch (err: any) {
+        if (err.message && (err.message.includes('not found') || err.message.includes('404') || err.message.includes('Route'))) {
+          try {
+            res = await fetchApi<{ user: any }>('/auth/profile', {
+              method: 'PUT',
+              token,
+              body,
+            });
+          } catch {
+            res = await fetchApi<{ user: any }>('/auth/profile', {
+              method: 'POST',
+              token,
+              body,
+            });
+          }
+        } else {
+          throw err;
+        }
+      }
 
       updateUser(res.user);
       setShowProfileModal(false);
