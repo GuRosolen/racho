@@ -51,6 +51,19 @@ enum ReceiptStatus {
   FAILED
 }
 
+enum SettlementStatus {
+  PENDING
+  AWAITING_CONFIRMATION
+  CONFIRMED
+  REJECTED
+}
+
+enum NotificationType {
+  SETTLEMENT_AWAITING_APPROVAL
+  SETTLEMENT_CONFIRMED
+  SETTLEMENT_REJECTED
+}
+
 enum AuditAction {
   CREATE_EXPENSE
   UPDATE_EXPENSE
@@ -79,6 +92,7 @@ model User {
   itemAssignments     ItemAssignment[]
   settlementsPaid     Settlement[]     @relation("SettlementPayer")
   settlementsReceived Settlement[]     @relation("SettlementReceiver")
+  notifications       Notification[]
   auditLogs           AuditLog[]
 
   @@map("users")
@@ -220,20 +234,46 @@ model ItemAssignment {
 }
 
 model Settlement {
-  id         String   @id @default(uuid())
-  groupId    String
-  payerId    String
-  receiverId String
-  amount     Int      // Valor em CENTAVOS
-  currency   Currency @default(BRL)
-  note       String?
-  createdAt  DateTime @default(now())
+  id          String           @id @default(uuid())
+  groupId     String
+  payerId     String
+  receiverId  String
+  amount      Int              // Valor em CENTAVOS
+  currency    Currency         @default(BRL)
+  status      SettlementStatus @default(PENDING)
+  note        String?
+  paidAt      DateTime?
+  confirmedAt DateTime?
+  rejectedAt  DateTime?
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
 
-  group    Group @relation(fields: [groupId], references: [id], onDelete: Cascade)
-  payer    User  @relation("SettlementPayer", fields: [payerId], references: [id])
-  receiver User  @relation("SettlementReceiver", fields: [receiverId], references: [id])
+  group         Group          @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  payer         User           @relation("SettlementPayer", fields: [payerId], references: [id])
+  receiver      User           @relation("SettlementReceiver", fields: [receiverId], references: [id])
+  notifications Notification[]
 
+  @@index([groupId])
+  @@index([payerId])
+  @@index([receiverId])
   @@map("settlements")
+}
+
+model Notification {
+  id           String           @id @default(uuid())
+  userId       String
+  settlementId String?
+  type         NotificationType
+  title        String
+  message      String
+  read         Boolean          @default(false)
+  createdAt    DateTime         @default(now())
+
+  user       User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  settlement Settlement? @relation(fields: [settlementId], references: [id], onDelete: Cascade)
+
+  @@index([userId, read])
+  @@map("notifications")
 }
 
 model AuditLog {

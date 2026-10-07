@@ -1,8 +1,8 @@
 # 📄 Documento de Especificação Técnica (SDD Phase 2 Addendum)
-## Módulo de Liquidação: Geração de Link e Código Pix com Valor Pré-Preenchido
+## Módulo de Liquidação: Geração de Link Pix e Quitação em Duas Vias (Two-Way Handshake)
 
 **Projeto:** Racho - Gestão de Despesas & Otimização de Dívidas  
-**Versão:** 2.1.0-delta  
+**Versão:** 2.2.0-delta  
 **Data:** 07/10/2026  
 **Autor:** Engenheiro de Software Sênior  
 **Status:** AGUARDANDO_REVISAO  
@@ -11,166 +11,195 @@
 
 ## 1. Contexto & Objetivos
 
-Como o cadastro de Chave Pix (CPF, E-mail, Telefone, Chave Aleatória EVM) já se encontra funcional no perfil do usuário (`User.pixKey` e `User.pixKeyType`), este aditivo ao SDD Phase 2 especifica a arquitetura e a funcionalidade da **Geração de Cobrança Pix Otimizada**, permitindo que dívidas resultantes da simplificação do grafo financeiro (ex: *"Diego deve R$ 35,50 para Shirley"*) sejam quitadas com 1-clique via QR Code/Copia e Cola com valor exato pré-preenchido e link compartilhável via WhatsApp.
+Este aditivo ao SDD Phase 2 especifica o mecanismo de **Quitação em Duas Vias (Two-Way Handshake)** e o **Sistema de Notificações Simplificado (+1)** para as liquidações do Racho. O objetivo é substituir a liquidação unidirecional instantânea por um fluxo seguro onde:
+1. O **Devedor** sinaliza a realização do pagamento Pix/TED ("Já paguei / Marcar como Quitado").
+2. O **Credor (Cobrador)** recebe uma notificação exclusiva em tempo real/polling `(+1)` para verificar o extrato bancário e **Confirmar Recebimento** ou **Contestar (Não Recebi)**.
+3. O saldo do grupo é **consolidado e abatido do grafo estritamente após a confirmação do credor**.
 
 ---
 
-## 2. Especificação Funcional
+## 2. Máquina de Estados da Liquidação (Settlement Lifecycle)
 
-### 2.1 Fluxo na Listagem de Saldos e Dívidas (Grafo Otimizado)
-Na aba de Saldos/Grafo de Dívidas (`/groups/:groupId`):
-1. **Identificação das Transações:** O sistema processa o grafo de dívidas (`balances.simplifiedDebts`) e renderiza os cards de transferência contendo `fromUserId` (devedor), `toUserId` (credor) e `amount` (em centavos inteiros).
-2. **Verificação de Chave Pix do Credor:**
-   - O sistema consulta os dados do credor (`toUserId`) na lista de membros do grupo.
-   - **Se o Credor POSSUIR Chave Pix:**
-     - Exibir o botão principal de ação: `[⚡ Pagar via Pix / Ver Cobrança]`.
-     - Ao clicar, abre o **Drawer/Modal de Liquidação Pix**.
-   - **Se o Credor NÃO POSSUIR Chave Pix:**
-     - Exibir aviso informativo no card: *"Credor ainda não cadastrou chave Pix"*.
-     - Exibir botão secundário fallback: `[💵 Quitar Manualmente (Dinheiro/TED)]`.
+### 2.1 Diagrama de Transição de Estados (Mermaid)
 
----
-
-### 2.2 Componente Modal/Drawer de Liquidação Pix
-
-Ao abrir o modal de liquidação para uma dívida de valor $V$ (em centavos) de $A$ para $B$:
-
-1. **Geração Dinâmica do Payload BR Code (BACEN / EMV QRCPS-MPM):**
-   - **Chave Pix do Credor:** `receiver.pixKey`
-   - **Nome do Credor:** `receiver.name` (sanitizado em ASCII maiúsculo)
-   - **Cidade do Credor:** `BRASILIA` (padrão fallback BACEN)
-   - **Valor Exato:** Formatado de centavos inteiros para string decimal `(amount / 100).toFixed(2)` (ex: `50.33`), garantindo zero erros de ponto flutuante.
-   - **Identificador de Transação (txId / Message):** `"Racho - " + group.name` (truncado em 25 caracteres no campo Tag 62 subtag 05).
-
-2. **Exibição & Interações:**
-   - **QR Code Renderizado:** Exibição do QR Code estático gerado diretamente na tela com o payload BR Code completo.
-   - **Botão "Copiar Código Pix (com valor)":** Copia a string inteira do EMV BR Code para a área de transferência (`navigator.clipboard.writeText`) com feedback visual (ex: ícone de check e mensagem por 2,5 segundos).
-   - **Gerador de Link Compartilhável Interno & WhatsApp Web Share API:**
-     - Geração da URL interna compartilhável: `/groups/:groupId/pay?to=:receiverId&amount=:amountCents`.
-     - Botão `[📲 Compartilhar Cobrança via WhatsApp]` acionando a Web Share API (`navigator.share`) com fallback para WhatsApp Deep Link (`https://wa.me/?text=...`).
-     - Mensagem formatada predefinida:
-       > *"Olá! Aqui está o link para pagamento do nosso racha no Racho (Grupo: {GroupName}): R$ {ValorFormatted}. Chave Pix: {PixKey}. Copie o código ou abra: {PayLink}"*
-
-3. **Ação Pós-Pagamento ("Confirmar Pagamento / Marcar como Quitado"):**
-   - Botão em destaque `[✅ Confirmar Pagamento / Marcar como Quitado]`.
-   - Ao ser clicado:
-     - Dispara requisição `POST /settlements` contendo `{ groupId, receiverId, amount, currency, note }`.
-     - Executa a transação no banco de dados, registra o `AuditLog` com a ação `CREATE_SETTLEMENT`.
-     - Fecha o modal, invalida o cache/estado dos saldos e atualiza o grafo de dívidas em tempo real.
-
----
-
-## 3. Especificação do Utilitário Pix (BR Code / EMV TLV)
-
-A montagem do payload estático segue estritamente a especificação **EMV QRCPS-MPM (BACEN / BR Code)** implementada em TypeScript nativo em `packages/shared/src/utils/pix.ts`, sem dependência de serviços externos de terceiros para garantir resiliência e baixíssima latência.
-
-### 3.1 Estrutura de Tags EMV TLV (Type-Length-Value)
-
-| Tag EMV | Descrição | Conteúdo / Regra de Formatação | Exemplo |
-| :--- | :--- | :--- | :--- |
-| **`00`** | Payload Format Indicator | Fixo `01` | `000201` |
-| **`01`** | Point of Initiation Method | Fixo `12` (Estático com valor pré-preenchido) | `010212` |
-| **`26`** | Merchant Account Information | Subtag `00` (`br.gov.bcb.pix`) + Subtag `01` (`pixKey`) | `26350014br.gov.bcb.pix0113user@pix.com` |
-| **`52`** | Merchant Category Code | Fixo `0000` | `52040000` |
-| **`53`** | Transaction Currency | Fixo `986` (BRL ISO 4217) | `5303986` |
-| **`54`** | Transaction Amount | Formatado em reais com 2 casas decimais a partir dos centavos inteiros | `540550.33` |
-| **`58`** | Country Code | Fixo `BR` | `5802BR` |
-| **`59`** | Merchant Name | Nome do Credor (Upper ASCII, NFD sem acentos, max 25 chars) | `5915SHIRLEY ROSOLEN` |
-| **`60`** | Merchant City | Cidade do Credor (Upper ASCII, NFD sem acentos, max 15 chars) | `6008BRASILIA` |
-| **`62`** | Additional Data Field | Subtag `05` (`txId` / Identificador da transação, max 25 chars) | `62180514RACHO-VIAGEM` |
-| **`63`** | CRC16 Checksum | Tag `63` + Tamanho `04` + Hexadecimal de 4 dígitos (CCITT 0x1021) | `6304A1B2` |
-
-### 3.2 Tratamento de Sanitização e Cálculo CRC16
-
-```typescript
-// Sanitização de Nome/Cidade (Remoção de diacríticos e caracteres não-ASCII)
-const cleanName = merchantName
-  .normalize('NFD')
-  .replace(/[\u0300-\u036f]/g, '')
-  .replace(/[^a-zA-Z0-9 ]/g, '')
-  .trim()
-  .slice(0, 25)
-  .toUpperCase();
-
-// Cálculo de CRC16-CCITT (Polinômio 0x1021, valor inicial 0xFFFF)
-function calculateCRC16(payload: string): string {
-  let crc = 0xffff;
-  for (let i = 0; i < payload.length; i++) {
-    crc ^= payload.charCodeAt(i) << 8;
-    for (let j = 0; j < 8; j++) {
-      if ((crc & 0x8000) !== 0) {
-        crc = (crc << 1) ^ 0x1021;
-      } else {
-        crc <<= 1;
-      }
+```mermaid
+stateDiagram-v2
+    [*] --> PENDING: Dívida Aberta (Grafo de Saldos)
+    
+    PENDING --> AWAITING_CONFIRMATION: Devedor clica "Já Paguei / Marcar como Quitado" (POST /settlements/:id/pay)
+    
+    state AWAITING_CONFIRMATION {
+        [*] --> NotificationCreated: Notificação gerada para o Credor (+1)
+        NotificationCreated --> AwaitingCreditorAction
     }
-  }
-  return (crc & 0xffff).toString(16).toUpperCase().padStart(4, '0');
+    
+    AWAITING_CONFIRMATION --> CONFIRMED: Credor clica "Confirmar Recebimento" (POST /settlements/:id/confirm)
+    AWAITING_CONFIRMATION --> REJECTED: Credor clica "Não Recebi / Contestar" (POST /settlements/:id/reject)
+    
+    REJECTED --> PENDING: Reverte para Dívida Pendente & Notifica Devedor
+    CONFIRMED --> [*]: Saldo Abatido Definitivamente do Grafo
+```
+
+### 2.2 Regras de Negócio e Permissões
+
+- **Controle de Acesso Estrito (403 Forbidden):** Apenas os usuários diretamente envolvidos na transação (`payerId` / devedor e `receiverId` / credor) possuem autorização para alterar os estados da liquidação. Usuários terceiros pertencentes ao mesmo grupo recebem erro `403 Forbidden`.
+- **Visibilidade no Grafo de Saldos:**
+  - Em estado `AWAITING_CONFIRMATION`, a dívida ganha a tag visual *"Aguardando Confirmação do Credor"* na interface. O saldo líquido do grupo permanece inalterado até a transição para `CONFIRMED`.
+  - Ao transicionar para `CONFIRMED`, o saldo é computado e abatido do grafo de dívidas.
+  - Ao transicionar para `REJECTED`, a notificação pendente do credor é removida, o devedor recebe um alerta da contestação e a dívida reaparece aberta no grafo.
+
+---
+
+## 3. Sistema de Notificação Simplificada (+1)
+
+### 3.1 Notificação Direcionada ao Cobrador (Credor)
+Ao atingir o estado `AWAITING_CONFIRMATION`:
+- Uma notificação leve é inserida na tabela `Notification` com `userId = receiverId`.
+- Na barra de navegação/header do credor, o ícone de notificações exibe o badge contador dinâmico (ex: `Notificações (+1)`).
+
+### 3.2 Estrutura Visual do Card de Notificação
+No painel/drawer de Notificações do Credor:
+- **Título:** `Solicitação de Confirmação de Pagamento`
+- **Mensagem:** `"[Nome do Devedor] marcou o pagamento de R$ XX,XX como realizado no grupo [Nome do Grupo]"`
+- **Ações Diretas no Card:**
+  - `[✅ Confirmar Recebimento]` (Botão Verde): Executa `POST /groups/:groupId/settlements/:id/confirm`.
+  - `[❌ Não Recebi / Contestar]` (Botão Vermelho/Outline): Executa `POST /groups/:groupId/settlements/:id/reject`.
+
+---
+
+## 4. Modelagem de Dados (Prisma Schema Update)
+
+### 4.1 Enums
+
+```prisma
+enum SettlementStatus {
+  PENDING
+  AWAITING_CONFIRMATION
+  CONFIRMED
+  REJECTED
+}
+
+enum NotificationType {
+  SETTLEMENT_AWAITING_APPROVAL
+  SETTLEMENT_CONFIRMED
+  SETTLEMENT_REJECTED
+}
+```
+
+### 4.2 Tabela `Settlement` Atualizada
+
+```prisma
+model Settlement {
+  id          String           @id @default(uuid())
+  groupId     String
+  payerId     String           // Devedor
+  receiverId  String           // Credor / Cobrador
+  amount      Int              // Valor em CENTAVOS
+  currency    Currency         @default(BRL)
+  status      SettlementStatus @default(PENDING)
+  note        String?
+  paidAt      DateTime?
+  confirmedAt DateTime?
+  rejectedAt  DateTime?
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  group         Group          @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  payer         User           @relation("SettlementPayer", fields: [payerId], references: [id])
+  receiver      User           @relation("SettlementReceiver", fields: [receiverId], references: [id])
+  notifications Notification[]
+
+  @@index([groupId])
+  @@index([payerId])
+  @@index([receiverId])
+  @@map("settlements")
+}
+```
+
+### 4.3 Tabela `Notification` (Novas Notificações Leves)
+
+```prisma
+model Notification {
+  id           String           @id @default(uuid())
+  userId       String           // Destinatário exclusivo da notificação
+  settlementId String?          // Referência opcional à liquidação
+  type         NotificationType
+  title        String
+  message      String
+  read         Boolean          @default(false)
+  createdAt    DateTime         @default(now())
+
+  user       User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  settlement Settlement? @relation(fields: [settlementId], references: [id], onDelete: Cascade)
+
+  @@index([userId, read])
+  @@map("notifications")
 }
 ```
 
 ---
 
-## 4. Contratos de API & DTOs
+## 5. Contratos de API & Endpoints (Fastify + Zod + Prisma)
 
-### 4.1 Segurança & Isolamento de Dados do Credor
-A chave Pix do credor **nunca deve ser exposta publicamente** para usuários anônimos ou membros de outros grupos. 
-- A consulta aos dados do credor exige autenticação JWT válida (`authenticate` middleware).
-- A API valida se o usuário solicitante (`request.user.sub`) compartilha a mesma associação de grupo (`GroupMember`) com o credor.
+### 5.1 Endpoints de Liquidação (Settlement Actions)
 
-### 4.2 Endpoint / Actions Envolvidas
+#### 1. Iniciar/Marcar Pagamento Realizado (Ação do Devedor)
+- **HTTP:** `POST /groups/:groupId/settlements/:id/pay`
+- **Autorização:** Apenas `payerId === request.user.sub`.
+- **Ação Transacional:**
+  1. Atualiza `status` para `AWAITING_CONFIRMATION` e preenche `paidAt = now()`.
+  2. Cria registro em `Notification` para `receiverId` com tipo `SETTLEMENT_AWAITING_APPROVAL`.
+- **Respostas:** `200 OK` `{ settlement, notification }`, `403 Forbidden`.
 
-#### 1. Consulta de Detalhes do Grupo e Chaves Pix dos Membros
-- **HTTP:** `GET /groups/:groupId`
+#### 2. Confirmar Recebimento (Ação do Credor)
+- **HTTP:** `POST /groups/:groupId/settlements/:id/confirm`
+- **Autorização:** Apenas `receiverId === request.user.sub`.
+- **Ação Transacional:**
+  1. Atualiza `status` para `CONFIRMED` e preenche `confirmedAt = now()`.
+  2. Marca a notificação vinculada como `read = true`.
+  3. Gera `AuditLog` (`CREATE_SETTLEMENT`) e consolida o abate do saldo no grafo de dívidas do grupo.
+- **Respostas:** `200 OK` `{ settlement }`, `403 Forbidden`.
+
+#### 3. Contestar / Não Recebi (Ação do Credor)
+- **HTTP:** `POST /groups/:groupId/settlements/:id/reject`
+- **Autorização:** Apenas `receiverId === request.user.sub`.
+- **Ação Transacional:**
+  1. Atualiza `status` para `REJECTED` (que reverte para dívida pendente no cálculo do grafo) e preenche `rejectedAt = now()`.
+  2. Cria notificação de aviso para o devedor (`payerId`) informando a contestação.
+- **Respostas:** `200 OK` `{ settlement }`, `403 Forbidden`.
+
+### 5.2 Endpoints de Notificação (Badge Light Polling)
+
+#### 1. Contador de Notificações Não Lidas
+- **HTTP:** `GET /notifications/unread-count`
 - **Headers:** `Authorization: Bearer <token>`
-- **Resposta DTO:**
-```typescript
-export interface GroupMemberResponse {
-  id: string;
-  userId: string;
-  name: string;
-  email: string;
-  avatarUrl: string | null;
-  pixKey: string | null;      // Apenas retornado para membros autenticados do grupo
-  pixKeyType: 'CPF' | 'EMAIL' | 'PHONE' | 'RANDOM' | null;
-  role: 'OWNER' | 'ADMIN' | 'MEMBER';
-}
-```
+- **Resposta:** `200 OK` `{ unreadCount: number }`
 
-#### 2. Registro de Liquidação (Settlement)
-- **HTTP:** `POST /settlements`
+#### 2. Listagem de Notificações do Usuário
+- **HTTP:** `GET /notifications`
 - **Headers:** `Authorization: Bearer <token>`
-- **Request Body (Zod DTO):**
-```typescript
-export const createSettlementSchema = z.object({
-  groupId: z.string().uuid(),
-  receiverId: z.string().uuid('ID do credor inválido'),
-  amount: z.number().int().positive('O valor da liquidação deve ser positivo em centavos'),
-  currency: z.enum(['BRL', 'USD', 'EUR', 'GBP']).default('BRL'),
-  note: z.string().optional(),
-});
-```
-- **HTTP Status Codes:**
-  - `201 Created`: Liquidação persistida com sucesso e saldo abatido.
-  - `403 Forbidden`: Usuário não é membro do grupo.
-  - `400 Bad Request`: Dados inválidos ou ID de credor inexistente.
+- **Resposta:** `200 OK` `{ notifications: NotificationResponse[] }`
+
+#### 3. Marcar Notificação como Lida
+- **HTTP:** `PATCH /notifications/:id/read`
+- **Resposta:** `200 OK` `{ success: true }`
 
 ---
 
-## 5. Matriz de Testes e Casos de Uso (Given / When / Then)
+## 6. Matriz de Testes e Casos de Uso (Given / When / Then)
 
 | ID | Caso de Uso / Cenário | Dado que (Given) | Quando (When) | Então (Then) |
 | :--- | :--- | :--- | :--- | :--- |
-| **UC-SETTLE-01** | **Geração de Payload Pix com Valor Pré-Preenchido Exato** | Existe uma dívida de **R$ 50,33** (`5033` centavos) onde o credor possui a chave Pix `shirley@racho.app` cadastrada. | O usuário clica em "Pagar via Pix / Ver Cobrança". | O payload BR Code gerado contém a subtag de valor `540550.33`, a chave `shirley@racho.app`, o nome sanitizado do credor e o checksum CRC16 final válido (4 caracteres hexadecimais). |
-| **UC-SETTLE-02** | **Tratamento de Credor Sem Chave Pix Cadastrada** | O credor `Diego` não possui chave Pix cadastrada (`pixKey === null`). | O usuário visualiza o card da dívida no grafo de saldos. | O sistema exibe o alerta informando *"Credor ainda não cadastrou chave Pix"*, oculta o QR Code automático e apresenta opção de acerto manual / lembrete. |
-| **UC-SETTLE-03** | **Cópia do Código Pix Copia e Cola para Clipboard** | O modal de liquidação Pix está aberto exibindo o QR Code e o botão "Copiar Código Pix (com valor)". | O usuário clica no botão de cópia. | O código EMV BR Code completo é gravado no `navigator.clipboard`, o estado visual muda para "Copiado com Sucesso!" por 2,5s e nenhum erro de cópia ocorre. |
-| **UC-SETTLE-04** | **Compartilhamento de Link de Cobrança via WhatsApp** | O modal de liquidação Pix está sendo exibido para uma dívida de R$ 120,00 no grupo "Viagem". | O usuário clica em "Compartilhar Cobrança via WhatsApp". | A Web Share API ou a URL `https://wa.me/?text=...` é disparada com o texto preenchido contendo o valor formatado, chave Pix e link direto para acerto no Racho. |
-| **UC-SETTLE-05** | **Efetivação da Liquidação no Banco de Dados** | O devedor concluiu a transferência Pix no app do banco e clica em "Confirmar Pagamento / Marcar como Quitado". | A requisição `POST /settlements` é executada com `{ groupId, receiverId, amount: 5033 }`. | A transação cria o registro em `Settlement`, gera log em `AuditLog`, zera/abate o saldo no grafo de dívidas e atualiza a interface em tempo real. |
+| **UC-HANDSHAKE-01** | **Devedor Marca como Pago e Credor Recebe Incremento +1** | Existe uma dívida de **R$ 35,50** entre Diego (devedor) e Shirley (credora). | Diego clica em "Já Paguei / Marcar como Quitado" (`POST /pay`). | O status muda para `AWAITING_CONFIRMATION`, o contador de notificações de Shirley recebe `+1` e o saldo permanece pendente de confirmação no grafo. |
+| **UC-HANDSHAKE-02** | **Credor Confirma Recebimento e Abate Saldo** | Existe uma liquidação em `AWAITING_CONFIRMATION`. | Shirley clica em "Confirmar Recebimento" (`POST /confirm`). | O status muda para `CONFIRMED`, a notificação é baixada (`read = true`), o saldo de R$ 35,50 é abatido do grupo e gravado no audit log. |
+| **UC-HANDSHAKE-03** | **Rejeição por Terceiro Não Autorizado (403)** | Existe uma liquidação entre Diego e Shirley. O usuário Gustavo (terceiro no grupo) tenta aprovar ou contestar. | Gustavo dispara `POST /confirm` ou `/reject`. | A API bloqueia a requisição e retorna `403 Forbidden: Apenas os participantes da dívida podem alterar este status`. |
+| **UC-HANDSHAKE-04** | **Credor Contesta Pagamento Não Recebido** | Existe uma liquidação em `AWAITING_CONFIRMATION`. | Shirley clica em "Não Recebi / Contestar" (`POST /reject`). | O status reverte para `REJECTED`, a dívida volta a figurar como pendente de pagamento no grafo e Diego recebe um alerta de contestação. |
 
 ---
 
-## 6. Próximos Passos (Aguardando Aprovação)
+## 7. Próximos Passos (Aguardando Aprovação)
 
-Após a sua revisão e homologação deste Documento de Especificação Técnica:
-1. Procederemos com a atualização/revisão dos componentes visuais do Next.js 14 (`apps/web/src/app/groups/[id]/page.tsx` e subcomponentes).
-2. Validação dos testes automatizados de backend e frontend (`pnpm test`).
+Após a sua revisão e homologação deste aditivo ao SDD:
+1. Atualizaremos o `schema.prisma` com `SettlementStatus`, `NotificationType` e a nova tabela `Notification`.
+2. Criaremos os testes unitários e rotas de API no backend Fastify.
+3. Desenvolveremos os componentes visuais do badge `(+1)` e drawer de notificações no Next.js 14.

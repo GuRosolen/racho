@@ -7,7 +7,7 @@
     "dev": "tsx watch src/server.ts",
     "build": "pnpm --filter @racho/shared build && pnpm --filter @racho/db build && tsc",
     "start": "tsx src/server.ts",
-    "test": "npx tsx --test src/modules/groups/group-invite.test.ts src/modules/expenses/expense-itemized.test.ts src/modules/expenses/expense-edit.test.ts src/modules/auth/pix.test.ts",
+    "test": "npx tsx --test src/modules/groups/group-invite.test.ts src/modules/expenses/expense-itemized.test.ts src/modules/expenses/expense-edit.test.ts src/modules/auth/pix.test.ts src/modules/settlements/settlements.test.ts",
     "lint": "tsc --noEmit"
   },
   "dependencies": {

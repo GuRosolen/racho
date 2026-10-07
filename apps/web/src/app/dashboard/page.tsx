@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuthStore } from '@/store/auth.store';
 import { fetchApi } from '@/lib/api';
+import { NotificationBell } from '@/components/NotificationBell';
 import { Plus, Users, ArrowRight, LogOut, Wallet, UserPlus, QrCode } from 'lucide-react';
 
 interface GroupSummary {
@@ -168,6 +169,8 @@ export default function DashboardPage() {
           </div>
 
           <div className="flex items-center gap-3">
+            <NotificationBell />
+
             <button
               onClick={openProfileModal}
               className="flex items-center gap-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-1.5 text-xs font-medium text-emerald-400 hover:bg-emerald-500/20 transition"

@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuthStore } from '@/store/auth.store';
 import { fetchApi } from '@/lib/api';
 import { formatCentsToCurrency, GroupBalancesResponse, generatePixPayload } from '@racho/shared';
+import { NotificationBell } from '@/components/NotificationBell';
 import {
   ArrowLeft,
   Plus,
@@ -12,6 +13,7 @@ import {
   Users,
   Copy,
   Check,
+  X,
   Zap,
   CheckCircle2,
   Trash2,
@@ -460,6 +462,7 @@ export default function GroupDetailPage({ params }: { params: Promise<{ id: stri
           groupId: group.id,
           receiverId: settlementTarget.toUserId,
           amount: settlementTarget.amount,
+          status: 'AWAITING_CONFIRMATION',
         }),
       });
 
@@ -472,10 +475,41 @@ export default function GroupDetailPage({ params }: { params: Promise<{ id: stri
       setBalances(balRes);
       setShowSettlementModal(false);
       setSettlementTarget(null);
+      alert('Sua sinalização de pagamento foi enviada! O saldo será consolidado assim que o credor confirmar o recebimento.');
     } catch (err: any) {
       alert(err.message || 'Erro ao registrar liquidação');
     } finally {
       setSettling(false);
+    }
+  };
+
+  const handleConfirmSettlementDirect = async (settlementId: string) => {
+    if (!token) return;
+    try {
+      await fetchApi(`/settlements/${settlementId}/confirm`, { method: 'POST', token });
+      const [expRes, balRes] = await Promise.all([
+        fetchApi<{ expenses: Expense[] }>(`/expenses/group/${groupId}`, { token }),
+        fetchApi<GroupBalancesResponse>(`/balances/group/${groupId}`, { token }),
+      ]);
+      setExpenses(expRes.expenses);
+      setBalances(balRes);
+    } catch (err: any) {
+      alert(err.message || 'Erro ao confirmar recebimento');
+    }
+  };
+
+  const handleRejectSettlementDirect = async (settlementId: string) => {
+    if (!token) return;
+    try {
+      await fetchApi(`/settlements/${settlementId}/reject`, { method: 'POST', token });
+      const [expRes, balRes] = await Promise.all([
+        fetchApi<{ expenses: Expense[] }>(`/expenses/group/${groupId}`, { token }),
+        fetchApi<GroupBalancesResponse>(`/balances/group/${groupId}`, { token }),
+      ]);
+      setExpenses(expRes.expenses);
+      setBalances(balRes);
+    } catch (err: any) {
+      alert(err.message || 'Erro ao contestar pagamento');
     }
   };
 
@@ -536,6 +570,19 @@ export default function GroupDetailPage({ params }: { params: Promise<{ id: stri
           </div>
 
           <div className="flex items-center gap-3">
+            <NotificationBell
+              onActionComplete={async () => {
+                if (token) {
+                  const [expRes, balRes] = await Promise.all([
+                    fetchApi<{ expenses: Expense[] }>(`/expenses/group/${groupId}`, { token }),
+                    fetchApi<GroupBalancesResponse>(`/balances/group/${groupId}`, { token }),
+                  ]);
+                  setExpenses(expRes.expenses);
+                  setBalances(balRes);
+                }
+              }}
+            />
+
             <button
               onClick={handleShare}
               className="flex items-center gap-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-1.5 text-xs font-medium text-emerald-400 transition hover:bg-emerald-500/20 shadow-sm"
@@ -717,11 +764,17 @@ export default function GroupDetailPage({ params }: { params: Promise<{ id: stri
                     const creditorMember = group?.members.find((m) => m.userId === debt.toUserId);
                     const hasPix = Boolean(creditorMember?.pixKey);
                     const isDebtor = user?.id === debt.fromUserId;
+                    const isCreditor = user?.id === debt.toUserId;
+                    const isAwaiting = debt.status === 'AWAITING_CONFIRMATION';
 
                     return (
                       <div
                         key={idx}
-                        className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-xl border border-gray-800 bg-[#131926] p-4 shadow-md hover:border-gray-700 transition"
+                        className={`flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-xl border p-4 shadow-md transition ${
+                          isAwaiting
+                            ? 'border-amber-500/40 bg-amber-500/5'
+                            : 'border-gray-800 bg-[#131926] hover:border-gray-700'
+                        }`}
                       >
                         <div className="space-y-1">
                           <div className="text-sm font-medium text-gray-200 flex items-center gap-2">
@@ -730,9 +783,14 @@ export default function GroupDetailPage({ params }: { params: Promise<{ id: stri
                             <strong className="text-emerald-400 font-semibold">{debt.toUserName}</strong>
                           </div>
 
-                          {hasPix ? (
+                          {isAwaiting ? (
+                            <div className="flex items-center gap-2 text-[11px] text-amber-300 font-medium">
+                              <span className="inline-block h-2 w-2 rounded-full bg-amber-400 animate-pulse"></span>
+                              <span>Aguardando Confirmação de Recebimento do Credor</span>
+                            </div>
+                          ) : hasPix ? (
                             <div className="flex items-center gap-2 text-[11px] text-emerald-400/90 font-medium">
-                              <span className="inline-block h-2 w-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                              <span className="inline-block h-2 w-2 rounded-full bg-emerald-400"></span>
                               <span>Chave Pix cadastrada ({creditorMember?.pixKeyType || 'Pix'})</span>
                             </div>
                           ) : (
@@ -748,7 +806,28 @@ export default function GroupDetailPage({ params }: { params: Promise<{ id: stri
                             {formatCentsToCurrency(debt.amount)}
                           </span>
 
-                          {hasPix ? (
+                          {isAwaiting ? (
+                            isCreditor ? (
+                              <div className="flex items-center gap-2">
+                                <button
+                                  onClick={() => debt.settlementId && handleConfirmSettlementDirect(debt.settlementId)}
+                                  className="flex items-center gap-1 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-emerald-500 transition shadow-md shadow-emerald-600/20"
+                                >
+                                  <Check className="h-3.5 w-3.5" /> Confirmar
+                                </button>
+                                <button
+                                  onClick={() => debt.settlementId && handleRejectSettlementDirect(debt.settlementId)}
+                                  className="flex items-center gap-1 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-1.5 text-xs font-semibold text-red-300 hover:bg-red-500/20 transition"
+                                >
+                                  <X className="h-3.5 w-3.5" /> Contestar
+                                </button>
+                              </div>
+                            ) : (
+                              <span className="rounded-lg bg-amber-500/10 border border-amber-500/30 px-3 py-1.5 text-xs font-semibold text-amber-300">
+                                Aguardando Credor
+                              </span>
+                            )
+                          ) : hasPix ? (
                             <button
                               onClick={() => {
                                 setSettlementTarget({

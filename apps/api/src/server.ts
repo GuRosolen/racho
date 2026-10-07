@@ -11,6 +11,7 @@ import { expenseRoutes } from './modules/expenses/expense.routes';
 import { balancesRoutes } from './modules/balances/balances.routes';
 import { settlementRoutes } from './modules/settlements/settlements.routes';
 import { receiptRoutes } from './modules/receipts/receipts.routes';
+import { notificationRoutes } from './modules/notifications/notifications.routes';
 
 dotenv.config();
 
@@ -63,7 +64,7 @@ app.register(jwt, {
 app.register(multipart);
 
 app.get('/health', async () => {
-  return { status: 'ok', service: 'racho-api', version: '1.0.6-pix-integration', timestamp: new Date().toISOString() };
+  return { status: 'ok', service: 'racho-api', version: '2.2.0-handshake', timestamp: new Date().toISOString() };
 });
 
 // Registra módulos da API
@@ -73,6 +74,7 @@ app.register(expenseRoutes, { prefix: '/expenses' });
 app.register(balancesRoutes, { prefix: '/balances' });
 app.register(settlementRoutes, { prefix: '/settlements' });
 app.register(receiptRoutes, { prefix: '/receipts' });
+app.register(notificationRoutes, { prefix: '/notifications' });
 
 const PORT = Number(process.env.PORT) || 3333;
 const HOST = process.env.HOST || '0.0.0.0';

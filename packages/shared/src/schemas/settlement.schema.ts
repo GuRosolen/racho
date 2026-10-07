@@ -1,12 +1,20 @@
 import { z } from 'zod';
 import { currencyEnum } from './group.schema';
 
+export const settlementStatusEnum = z.enum([
+  'PENDING',
+  'AWAITING_CONFIRMATION',
+  'CONFIRMED',
+  'REJECTED',
+]);
+
 export const createSettlementSchema = z.object({
   groupId: z.string().uuid(),
   receiverId: z.string().uuid('ID do credor inválido'),
   amount: z.number().int().positive('O valor da liquidação deve ser positivo em centavos'),
   currency: currencyEnum.default('BRL'),
   note: z.string().optional(),
+  status: settlementStatusEnum.optional().default('PENDING'),
 });
 
 export const simplifiedDebtSchema = z.object({
@@ -16,6 +24,8 @@ export const simplifiedDebtSchema = z.object({
   toUserName: z.string(),
   amount: z.number().int().positive(),
   currency: currencyEnum,
+  settlementId: z.string().uuid().optional(),
+  status: settlementStatusEnum.optional().default('PENDING'),
 });
 
 export const groupBalanceSummarySchema = z.object({
@@ -31,6 +41,7 @@ export const groupBalancesResponseSchema = z.object({
   simplifiedDebts: z.array(simplifiedDebtSchema),
 });
 
+export type SettlementStatus = z.infer<typeof settlementStatusEnum>;
 export type CreateSettlementInput = z.infer<typeof createSettlementSchema>;
 export type SimplifiedDebt = z.infer<typeof simplifiedDebtSchema>;
 export type GroupBalancesResponse = z.infer<typeof groupBalancesResponseSchema>;

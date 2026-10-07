@@ -35,9 +35,20 @@ export class BalancesService {
       },
     });
 
-    // 2. Obter todas as liquidações do grupo
-    const settlements = await db.settlement.findMany({
-      where: { groupId },
+    // 2. Obter liquidações confirmadas para abate de saldo
+    const confirmedSettlements = await db.settlement.findMany({
+      where: {
+        groupId,
+        status: 'CONFIRMED',
+      },
+    });
+
+    // 2b. Obter liquidações pendentes / aguardando confirmação
+    const activeSettlements = await db.settlement.findMany({
+      where: {
+        groupId,
+        status: { in: ['AWAITING_CONFIRMATION', 'PENDING', 'REJECTED'] },
+      },
     });
 
     // 3. Inicializar mapa de saldos por membro do grupo
@@ -62,10 +73,8 @@ export class BalancesService {
       }
     }
 
-    // Processar acertos/liquidações (Settlements):
-    // Payer (Devedor que transferiu o dinheiro) tem seu saldo creditado (+)
-    // Receiver (Credor que recebeu o dinheiro) tem seu saldo debitado (-)
-    for (const settlement of settlements) {
+    // Processar APENAS liquidações CONFIRMADAS no cálculo de saldo líquido:
+    for (const settlement of confirmedSettlements) {
       const payerEntry = balanceMap.get(settlement.payerId);
       if (payerEntry) {
         payerEntry.netBalance += settlement.amount;
@@ -83,7 +92,7 @@ export class BalancesService {
     }));
 
     // 4. Executar o Algoritmo de Simplificação de Dívidas (Graph Min-Flow - UC03)
-    const simplifiedDebts = this.simplifyDebts(balances, group.currency);
+    const simplifiedDebts = this.simplifyDebts(balances, group.currency, activeSettlements);
 
     return {
       groupId,
@@ -98,7 +107,8 @@ export class BalancesService {
    */
   private simplifyDebts(
     balances: { userId: string; userName: string; netBalance: number }[],
-    currency: Currency
+    currency: Currency,
+    activeSettlements: any[] = []
   ): SimplifiedDebt[] {
     const debtors: { userId: string; userName: string; netBalance: number }[] = [];
     const creditors: { userId: string; userName: string; netBalance: number }[] = [];
@@ -126,6 +136,11 @@ export class BalancesService {
       const settledAmount = Math.min(debtor.netBalance, creditor.netBalance);
 
       if (settledAmount > 0) {
+        // Buscar se existe um acerto em andamento entre este devedor e credor
+        const matchingSettlement = activeSettlements.find(
+          (s) => s.payerId === debtor.userId && s.receiverId === creditor.userId
+        );
+
         transactions.push({
           fromUserId: debtor.userId,
           fromUserName: debtor.userName,
@@ -133,6 +148,8 @@ export class BalancesService {
           toUserName: creditor.userName,
           amount: settledAmount,
           currency,
+          settlementId: matchingSettlement ? matchingSettlement.id : undefined,
+          status: matchingSettlement ? matchingSettlement.status : 'PENDING',
         });
 
         debtor.netBalance -= settledAmount;
