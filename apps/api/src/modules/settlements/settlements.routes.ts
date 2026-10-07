@@ -71,6 +71,7 @@ export async function settlementRoutes(app: FastifyInstance) {
               status: desiredStatus,
               paidAt: desiredStatus === 'AWAITING_CONFIRMATION' ? new Date() : undefined,
               note,
+              updatedAt: new Date(),
             },
             include: {
               payer: { select: { id: true, name: true } },
