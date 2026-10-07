@@ -35,7 +35,14 @@ function calculateCRC16(payload: string): string {
 export function generatePixPayload(params: PixPayloadParams): string {
   const { pixKey, merchantName, merchantCity = 'BRASILIA', amountCents, txId = '***' } = params;
 
-  // Sanitizar nome e cidade para ASCII sem acentos
+  // Sanitizar Chave Pix (Tag 26.01): Se for CPF, manter estritamente apenas os 11 dígitos numéricos
+  let cleanKey = pixKey.trim();
+  const rawDigits = cleanKey.replace(/\D/g, '');
+  if (rawDigits.length === 11 && !cleanKey.includes('@')) {
+    cleanKey = rawDigits;
+  }
+
+  // Sanitizar nome e cidade para ASCII sem acentos (Tags 59 e 60)
   const cleanName = (merchantName || 'MEMBRO')
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
@@ -52,15 +59,27 @@ export function generatePixPayload(params: PixPayloadParams): string {
     .slice(0, 15)
     .toUpperCase();
 
+  // Sanitizar txId (Tag 62.05): Padrão BACEN exige ESTRITAMENTE alfanumérico [a-zA-Z0-9] sem espaços, traços ou símbolos.
+  // Se o txId for nulo, vazio ou inválido após sanitização, utiliza o fallback oficial '***'.
+  let cleanTx = (txId || '***')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-zA-Z0-9]/g, '') // Remove hífens, espaços e símbolos
+    .slice(0, 25);
+
+  if (!cleanTx || cleanTx.length === 0) {
+    cleanTx = '***';
+  }
+
   const amountStr = (amountCents / 100).toFixed(2);
 
   // Merchant Account Info (Tag 26)
   const gui = emvField('00', 'br.gov.bcb.pix');
-  const key = emvField('01', pixKey.trim());
+  const key = emvField('01', cleanKey);
   const merchantAccountInfo = emvField('26', `${gui}${key}`);
 
   // Additional Data Field Template (Tag 62)
-  const txField = emvField('05', txId.slice(0, 25));
+  const txField = emvField('05', cleanTx);
   const additionalData = emvField('62', txField);
 
   // String base do payload EMV antes do CRC16
